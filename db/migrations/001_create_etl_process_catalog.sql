@@ -1,5 +1,8 @@
 -- 001: catálogo de procesos ETL (dbo.EtlProcess)
--- Aditivo puro: no toca ETL_Control ni ETL_Log. Backfillea con lo que ya existe hoy.
+-- v2: dbo/dw se resetearon a un espejo limpio de producción (sin datos, sin objetos
+-- de control). Ya no existe ningún proceso que dependa de nombres/columnas viejas
+-- (dw.usp_MergeBascula / usp_MergeProducto tampoco existen ya), así que el diseño
+-- de aquí en adelante es limpio, no aditivo sobre estructuras heredadas.
 
 IF NOT EXISTS (
     SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id
@@ -19,37 +22,20 @@ BEGIN
         Activo              BIT           NOT NULL CONSTRAINT DF_EtlProcess_Activo DEFAULT (1),
         FechaCreacion       DATETIME2(7)  NOT NULL CONSTRAINT DF_EtlProcess_FechaCreacion DEFAULT (SYSDATETIME()),
         FechaModificacion   DATETIME2(7)  NULL,
-        CONSTRAINT UQ_EtlProcess_ProcesoNombre UNIQUE (ProcesoNombre)
+        CONSTRAINT UQ_EtlProcess_ProcesoNombre UNIQUE (ProcesoNombre),
+        CONSTRAINT CK_EtlProcess_TipoCarga CHECK (TipoCarga IN ('Incremental','FULL'))
     );
 END
 GO
 
--- Backfill: cualquier Proceso ya usado en ETL_Control o ETL_Log entra al catálogo
-INSERT INTO dbo.EtlProcess (ProcesoNombre)
-SELECT DISTINCT c.Proceso
-FROM dbo.ETL_Control c
-WHERE NOT EXISTS (SELECT 1 FROM dbo.EtlProcess p WHERE p.ProcesoNombre = c.Proceso);
-GO
-
-INSERT INTO dbo.EtlProcess (ProcesoNombre)
-SELECT DISTINCT l.Proceso
-FROM dbo.ETL_Log l
-WHERE NOT EXISTS (SELECT 1 FROM dbo.EtlProcess p WHERE p.ProcesoNombre = l.Proceso);
-GO
-
--- Clasificación conocida hoy (no-solar): Producto y Bascula ya tienen MERGE en dw
-UPDATE dbo.EtlProcess
-SET Dominio = 'Producto', SistemaOrigen = 'AS400/LX', EsquemaOrigen = 'stg', TablaOrigen = 'dimProducto',
-    EsquemaDestino = 'dw', TablaDestino = 'dimProducto'
-WHERE ProcesoNombre = 'Producto';
+-- Semilla: procesos no-solares conocidos hoy en JAREMAR (producto y báscula).
+-- factMovimientosBascula reemplazó a factBascula en el rebuild de stg del 2026-09-20.
+IF NOT EXISTS (SELECT 1 FROM dbo.EtlProcess WHERE ProcesoNombre = 'Producto')
+    INSERT INTO dbo.EtlProcess (ProcesoNombre, Dominio, SistemaOrigen, EsquemaOrigen, TablaOrigen, EsquemaDestino, TablaDestino, TipoCarga)
+    VALUES ('Producto', 'Producto', 'AS400/LX', 'stg', 'dimProducto', 'dw', 'dimProducto', 'FULL');
 GO
 
 IF NOT EXISTS (SELECT 1 FROM dbo.EtlProcess WHERE ProcesoNombre = 'Bascula')
     INSERT INTO dbo.EtlProcess (ProcesoNombre, Dominio, SistemaOrigen, EsquemaOrigen, TablaOrigen, EsquemaDestino, TablaDestino, TipoCarga)
-    VALUES ('Bascula', 'Bascula', 'AS400/LX', 'stg', 'factBascula', 'dw', 'factBascula', 'Incremental');
-ELSE
-    UPDATE dbo.EtlProcess
-    SET Dominio = 'Bascula', SistemaOrigen = 'AS400/LX', EsquemaOrigen = 'stg', TablaOrigen = 'factBascula',
-        EsquemaDestino = 'dw', TablaDestino = 'factBascula'
-    WHERE ProcesoNombre = 'Bascula';
+    VALUES ('Bascula', 'Bascula', 'AS400/LX', 'stg', 'factMovimientosBascula', 'dw', 'factMovimientosBascula', 'Incremental');
 GO
