@@ -9,7 +9,7 @@ metadata real de esas columnas en el AS400 (evita adivinar precision/escala
 de los DECIMAL a mano).
 
 Uso:
-    python db/etl/extract_dim_producto.py [--env-file .env]
+    python db/etl/dimProducto/extract_dim_producto.py [--env-file .env]
 """
 import argparse
 import datetime
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pyodbc
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_CACHE_DIR = Path(__file__).resolve().parent / "schema_cache"
 
 PROCESO = "Producto"

@@ -8,7 +8,7 @@ registro (a diferencia de IIM). La estructura de stg.dimClasesProducto se
 auto-provisiona a partir de la metadata real de esas columnas en el AS400.
 
 Uso:
-    python db/etl/extract_dim_clases_producto.py [--env-file .env]
+    python db/etl/dimClasesProducto/extract_dim_clases_producto.py [--env-file .env]
 """
 import argparse
 import datetime
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pyodbc
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_CACHE_DIR = Path(__file__).resolve().parent / "schema_cache"
 
 PROCESO = "ClasesProducto"

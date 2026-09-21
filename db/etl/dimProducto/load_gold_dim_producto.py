@@ -6,7 +6,7 @@ dw.usp_MergeDimProducto; este script solo orquesta el ciclo de control
 (registro de proceso, log de corrida, watermark).
 
 Uso:
-    python db/etl/load_gold_dim_producto.py [--env-file .env]
+    python db/etl/dimProducto/load_gold_dim_producto.py [--env-file .env]
 """
 import argparse
 import datetime
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pyodbc
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
 PROCESO = "Producto_Gold"
 
 

@@ -1,12 +1,12 @@
 """
-Silver: stg.dimClasesProducto -> [int].dimClasesProducto (tipado, dedup por ICLAS).
+Gold: [int].dimClasesProducto -> dw.dimClasesProducto (SCD Tipo 1, nombres de negocio).
 
 Todo ocurre dentro de JAREMAR -- el trabajo real lo hace
-[int].usp_MergeDimClasesProducto; este script solo orquesta el ciclo de
-control (registro de proceso, log de corrida, watermark).
+dw.usp_MergeDimClasesProducto; este script solo orquesta el ciclo de control
+(registro de proceso, log de corrida, watermark).
 
 Uso:
-    python db/etl/load_silver_dim_clases_producto.py [--env-file .env]
+    python db/etl/dimClasesProducto/load_gold_dim_clases_producto.py [--env-file .env]
 """
 import argparse
 import datetime
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pyodbc
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-PROCESO = "ClasesProducto_Silver"
+ROOT = Path(__file__).resolve().parent.parent.parent.parent
+PROCESO = "ClasesProducto_Gold"
 
 
 def load_env(path: Path) -> dict:
@@ -56,7 +56,7 @@ def registrar_proceso(cur: pyodbc.Cursor) -> int:
             @ProcesoId = @pid OUTPUT;
         SELECT @pid;
         """,
-        PROCESO, "Producto", "stg", "stg", "dimClasesProducto", "int", "dimClasesProducto", "FULL",
+        PROCESO, "Producto", "int", "int", "dimClasesProducto", "dw", "dimClasesProducto", "FULL",
     )
     return cur.fetchone()[0]
 
@@ -95,7 +95,7 @@ def main() -> int:
     print(f"RunId: {run_id}")
 
     try:
-        cur.execute("EXEC [int].usp_MergeDimClasesProducto @RunId = ?", run_id)
+        cur.execute("EXEC dw.usp_MergeDimClasesProducto @RunId = ?", run_id)
         filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas = cur.fetchone()
         print(
             f"Leidas: {filas_leidas} / Insertadas: {filas_insertadas} / "
@@ -114,14 +114,14 @@ def main() -> int:
         conn.commit()
     except Exception as exc:
         conn.rollback()
-        finalizar_run(cur, run_id, "ERROR", mensaje_error=str(exc), tarea_error="Merge Silver")
+        finalizar_run(cur, run_id, "ERROR", mensaje_error=str(exc), tarea_error="Merge Gold")
         conn.commit()
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     finally:
         conn.close()
 
-    print("Carga Silver completada.")
+    print("Carga Gold completada.")
     return 0
 
 
