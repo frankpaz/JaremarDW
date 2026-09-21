@@ -1,8 +1,9 @@
 -- 001: catálogo de procesos ETL (dbo.EtlProcess)
--- v2: dbo/dw se resetearon a un espejo limpio de producción (sin datos, sin objetos
--- de control). Ya no existe ningún proceso que dependa de nombres/columnas viejas
--- (dw.usp_MergeBascula / usp_MergeProducto tampoco existen ya), así que el diseño
--- de aquí en adelante es limpio, no aditivo sobre estructuras heredadas.
+-- v3: punto de partida limpio. Producto y Bascula (sembrados en v1/v2) fueron
+-- descontinuados el 2026-09-21 -- el usuario eliminó manualmente
+-- stg.dimProducto y stg.factMovimientosBascula por no servirle. El catálogo
+-- arranca vacío; se puebla vía dbo.usp_Etl_ProcesoRegistrar según se vayan
+-- incorporando procesos reales.
 
 IF NOT EXISTS (
     SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id
@@ -26,16 +27,4 @@ BEGIN
         CONSTRAINT CK_EtlProcess_TipoCarga CHECK (TipoCarga IN ('Incremental','FULL'))
     );
 END
-GO
-
--- Semilla: procesos no-solares conocidos hoy en JAREMAR (producto y báscula).
--- factMovimientosBascula reemplazó a factBascula en el rebuild de stg del 2026-09-20.
-IF NOT EXISTS (SELECT 1 FROM dbo.EtlProcess WHERE ProcesoNombre = 'Producto')
-    INSERT INTO dbo.EtlProcess (ProcesoNombre, Dominio, SistemaOrigen, EsquemaOrigen, TablaOrigen, EsquemaDestino, TablaDestino, TipoCarga)
-    VALUES ('Producto', 'Producto', 'AS400/LX', 'stg', 'dimProducto', 'dw', 'dimProducto', 'FULL');
-GO
-
-IF NOT EXISTS (SELECT 1 FROM dbo.EtlProcess WHERE ProcesoNombre = 'Bascula')
-    INSERT INTO dbo.EtlProcess (ProcesoNombre, Dominio, SistemaOrigen, EsquemaOrigen, TablaOrigen, EsquemaDestino, TablaDestino, TipoCarga)
-    VALUES ('Bascula', 'Bascula', 'AS400/LX', 'stg', 'factMovimientosBascula', 'dw', 'factMovimientosBascula', 'Incremental');
 GO
