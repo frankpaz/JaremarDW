@@ -1,0 +1,26 @@
+IF NOT EXISTS (
+    SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE s.name = 'stg' AND t.name = 'factComprasLineas'
+)
+BEGIN
+    CREATE TABLE stg.factComprasLineas (
+    [PLCMPY] DECIMAL(2,0) NULL,
+    [PLDCPX] NVARCHAR(2) NULL,
+    [PLDCYR] DECIMAL(2,0) NULL,
+    [PLDCSQ] DECIMAL(8,0) NULL,
+    [PLLINE] DECIMAL(4,0) NULL,
+    [PLVNDR] DECIMAL(8,0) NULL,
+    [PLINV] NVARCHAR(10) NULL,
+    [PLTYPE] NVARCHAR(1) NULL,
+    [PLGLDT] DECIMAL(8,0) NULL,
+    [PLAMT] DECIMAL(15,2) NULL,
+    [PLBAMT] DECIMAL(15,2) NULL,
+    [PLDESC] NVARCHAR(25) NULL,
+    [PLUSER] NVARCHAR(10) NULL,
+    [PLEDTE] DECIMAL(8,0) NULL,
+    [PLETIM] DECIMAL(6,0) NULL,
+    [PLRESN] NVARCHAR(5) NULL,
+    [FechaCargaStg] DATETIME2(7) NOT NULL CONSTRAINT DF_factComprasLineas_FechaCargaStg DEFAULT (SYSDATETIME()),
+    [RunId] INT NULL
+    );
+END

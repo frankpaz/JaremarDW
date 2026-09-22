@@ -1,0 +1,32 @@
+IF NOT EXISTS (
+    SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE s.name = 'stg' AND t.name = 'factComprasEncabezados'
+)
+BEGIN
+    CREATE TABLE stg.factComprasEncabezados (
+    [APCMPY] DECIMAL(2,0) NULL,
+    [PHDCPX] NVARCHAR(2) NULL,
+    [PHDCYR] DECIMAL(2,0) NULL,
+    [PHDCSQ] DECIMAL(8,0) NULL,
+    [APHPND] DECIMAL(8,0) NULL,
+    [APHBNK] NVARCHAR(3) NULL,
+    [APHCUR] NVARCHAR(3) NULL,
+    [APHOLD] NVARCHAR(1) NULL,
+    [AINVDT] DECIMAL(8,0) NULL,
+    [ADUEDT] DECIMAL(8,0) NULL,
+    [ADISCD] DECIMAL(8,0) NULL,
+    [APCINA] DECIMAL(15,2) NULL,
+    [APCAMP] DECIMAL(15,2) NULL,
+    [APCOUT] DECIMAL(15,2) NULL,
+    [APPORD] DECIMAL(8,0) NULL,
+    [APTERM] NVARCHAR(2) NULL,
+    [APSTAT] NVARCHAR(1) NULL,
+    [APPAYS] NVARCHAR(1) NULL,
+    [PHHTRT] DECIMAL(7,4) NULL,
+    [PHTXBA] DECIMAL(15,2) NULL,
+    [APVNTX] NVARCHAR(5) NULL,
+    [APPAYT] NVARCHAR(1) NULL,
+    [FechaCargaStg] DATETIME2(7) NOT NULL CONSTRAINT DF_factComprasEncabezados_FechaCargaStg DEFAULT (SYSDATETIME()),
+    [RunId] INT NULL
+    );
+END
