@@ -1,14 +1,23 @@
 """
-Discovery: busca tablas candidatas en el AS400/LX por palabra clave, usando
-el catalogo del sistema QSYS2.SYSTABLES (nombre + descripcion de negocio).
+Discovery: busca o lista tablas del AS400/LX usando el catalogo del sistema
+QSYS2.SYSTABLES (nombre + descripcion de negocio).
 
 Util para encontrar la tabla de origen correcta antes de armar un pipeline
 nuevo, sin tener que adivinar el nombre tecnico de memoria (ej. el maestro
 de clientes puede llamarse ARCUST, CUST, CLIMTA, etc. segun el ERP).
 
+Dos modos:
+- Busqueda por palabra clave (--like): filtra por nombre o descripcion.
+- Listado completo de una libreria (--schema sin --like): trae TODAS las
+  tablas fisicas (TABLE_TYPE='P' por defecto, --tipo para cambiarlo) --
+  util para reconocimiento general de una libreria nueva, no solo cuando
+  ya se tiene una palabra clave en mente.
+
 Uso:
     python db/discovery/buscar_tablas.py --like CUST [--schema PROLX835F] [--env-file .env]
     python db/discovery/buscar_tablas.py --like CLIENTE --schema PROLXUSRF
+    python db/discovery/buscar_tablas.py --schema PROLX835F              # todas las tablas fisicas
+    python db/discovery/buscar_tablas.py --schema PROLX835F --tipo L     # solo logicas (indices)
 """
 import argparse
 from pathlib import Path
@@ -65,22 +74,45 @@ def buscar(cur: pyodbc.Cursor, patron: str, esquema: str | None) -> list:
     return cur.fetchall()
 
 
+def listar(cur: pyodbc.Cursor, esquema: str, tipo: str) -> list:
+    cur.execute(
+        """
+        SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TEXT, TABLE_TYPE
+        FROM QSYS2.SYSTABLES
+        WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = ?
+        ORDER BY TABLE_NAME
+        """,
+        esquema, tipo,
+    )
+    return cur.fetchall()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--like", required=True, help="Palabra clave a buscar en nombre o descripcion de la tabla")
-    parser.add_argument("--schema", default=None, help="Limitar la busqueda a un esquema/biblioteca (ej. PROLX835F)")
+    parser.add_argument("--like", default=None, help="Palabra clave a buscar en nombre o descripcion de la tabla (omitir para listar todo)")
+    parser.add_argument("--schema", default=None, help="Esquema/biblioteca (ej. PROLX835F). Obligatorio si no se pasa --like")
+    parser.add_argument("--tipo", default="P", help="TABLE_TYPE a listar cuando no hay --like: P=fisica (defecto), L=logica, V=vista")
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
     args = parser.parse_args()
+
+    if not args.like and not args.schema:
+        parser.error("--schema es obligatorio cuando no se pasa --like (listado completo de una libreria)")
 
     env = load_env(Path(args.env_file))
     conn = connect_as400(env)
     cur = conn.cursor()
 
-    filas = buscar(cur, args.like, args.schema)
+    if args.like:
+        filas = buscar(cur, args.like, args.schema)
+    else:
+        filas = listar(cur, args.schema, args.tipo)
     conn.close()
 
     if not filas:
-        print(f"Sin resultados para '{args.like}'" + (f" en {args.schema}" if args.schema else ""))
+        if args.like:
+            print(f"Sin resultados para '{args.like}'" + (f" en {args.schema}" if args.schema else ""))
+        else:
+            print(f"Sin tablas tipo '{args.tipo}' en {args.schema}")
         return 0
 
     print(f"{len(filas)} tabla(s) encontradas:\n")
