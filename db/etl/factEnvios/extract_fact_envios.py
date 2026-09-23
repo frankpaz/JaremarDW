@@ -36,6 +36,7 @@ AS400_TABLA_ORIGEN = "ENVU0016"
 FILTRO_COLUMNA = "ENCENV"
 STG_ESQUEMA = "stg"
 STG_TABLA = "factEnvios"
+TAMANO_LOTE = 10000
 
 # Columnas confirmadas por el equipo de datos (query real que ya usan)
 COLUMNAS_DESEADAS = [
@@ -225,7 +226,7 @@ END
 
 # --- Extraccion / carga ------------------------------------------------------
 
-def extraer_filas(as400_cur: pyodbc.Cursor, columnas: list) -> list:
+def ejecutar_consulta_origen(as400_cur: pyodbc.Cursor, columnas: list) -> None:
     # DB2 for i no soporta comillas cuadradas para identificadores (eso es
     # sintaxis de SQL Server) -- se usan comillas dobles.
     nombres = ", ".join(f'"{c["nombre"]}"' for c in columnas)
@@ -233,30 +234,19 @@ def extraer_filas(as400_cur: pyodbc.Cursor, columnas: list) -> list:
         f'SELECT {nombres} FROM {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN} '
         f'WHERE "{FILTRO_COLUMNA}" <> 0'
     )
-    return as400_cur.fetchall()
 
 
-def cargar_stg(jrm_conn, jrm_cur, columnas: list, filas: list, run_id: int) -> tuple:
-    nombres_cols = [c["nombre"] for c in columnas]
-    llave_idx = nombres_cols.index("ENCENV") if "ENCENV" in nombres_cols else None
-
-    jrm_cur.execute(f"TRUNCATE TABLE {STG_ESQUEMA}.{STG_TABLA}")
-
-    col_list_sql = ", ".join(f"[{n}]" for n in nombres_cols) + ", [RunId]"
-    placeholders = ", ".join(["?"] * (len(nombres_cols) + 1))
-    insert_sql = f"INSERT INTO {STG_ESQUEMA}.{STG_TABLA} ({col_list_sql}) VALUES ({placeholders})"
-
-    filas_con_run = [tuple(f) + (run_id,) for f in filas]
-
+def cargar_lote(jrm_conn, jrm_cur, insert_sql: str, nombres_cols: list, llave_idx, lote: list, run_id: int) -> tuple:
+    lote_con_run = [tuple(f) + (run_id,) for f in lote]
     try:
-        jrm_cur.executemany(insert_sql, filas_con_run)
+        jrm_cur.executemany(insert_sql, lote_con_run)
         jrm_conn.commit()
-        return len(filas_con_run), 0
+        return len(lote_con_run), 0
     except pyodbc.Error:
         jrm_conn.rollback()
 
     insertadas, rechazadas = 0, 0
-    for fila in filas_con_run:
+    for fila in lote_con_run:
         try:
             jrm_cur.execute(insert_sql, fila)
             jrm_conn.commit()
@@ -269,6 +259,30 @@ def cargar_stg(jrm_conn, jrm_cur, columnas: list, filas: list, run_id: int) -> t
             registrar_error_fila(jrm_cur, run_id, llave, payload, str(exc))
             jrm_conn.commit()
     return insertadas, rechazadas
+
+
+def extraer_y_cargar_por_lotes(jrm_conn, jrm_cur, as400_cur, columnas: list, run_id: int) -> tuple:
+    nombres_cols = [c["nombre"] for c in columnas]
+    llave_idx = nombres_cols.index("ENCENV") if "ENCENV" in nombres_cols else None
+
+    jrm_cur.execute(f"TRUNCATE TABLE {STG_ESQUEMA}.{STG_TABLA}")
+
+    col_list_sql = ", ".join(f"[{n}]" for n in nombres_cols) + ", [RunId]"
+    placeholders = ", ".join(["?"] * (len(nombres_cols) + 1))
+    insert_sql = f"INSERT INTO {STG_ESQUEMA}.{STG_TABLA} ({col_list_sql}) VALUES ({placeholders})"
+
+    total_leidas = total_insertadas = total_rechazadas = 0
+    while True:
+        lote = as400_cur.fetchmany(TAMANO_LOTE)
+        if not lote:
+            break
+        total_leidas += len(lote)
+        insertadas, rechazadas = cargar_lote(jrm_conn, jrm_cur, insert_sql, nombres_cols, llave_idx, lote, run_id)
+        total_insertadas += insertadas
+        total_rechazadas += rechazadas
+        print(f"  Lote de {len(lote)} filas -> insertadas {insertadas} / rechazadas {rechazadas} (acumulado: {total_leidas})", flush=True)
+
+    return total_leidas, total_insertadas, total_rechazadas
 
 
 def main() -> int:
@@ -305,15 +319,14 @@ def main() -> int:
         asegurar_tabla_stg(jrm_cur, columnas)
         jrm_conn.commit()
 
-        filas = extraer_filas(as400_cur, columnas)
-        print(f"Filas leidas del AS400: {len(filas)}")
-
-        insertadas, rechazadas = cargar_stg(jrm_conn, jrm_cur, columnas, filas, run_id)
+        ejecutar_consulta_origen(as400_cur, columnas)
+        leidas, insertadas, rechazadas = extraer_y_cargar_por_lotes(jrm_conn, jrm_cur, as400_cur, columnas, run_id)
+        print(f"Filas leidas del AS400: {leidas}")
         print(f"Insertadas: {insertadas} / Rechazadas: {rechazadas}")
 
         finalizar_run(
             jrm_cur, run_id, "EXITO" if rechazadas == 0 else "ADVERTENCIA",
-            filas_leidas=len(filas), filas_insertadas=insertadas, filas_rechazadas=rechazadas,
+            filas_leidas=leidas, filas_insertadas=insertadas, filas_rechazadas=rechazadas,
         )
         actualizar_watermark(jrm_cur)
         jrm_conn.commit()
