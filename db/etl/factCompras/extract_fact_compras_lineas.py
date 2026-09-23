@@ -294,6 +294,10 @@ def extraer_y_cargar_por_lotes(jrm_conn, jrm_cur, as400_cur, columnas: list, run
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
+    parser.add_argument(
+        "--reconciliar", action="store_true",
+        help="Ignora el watermark y extrae todo el historico (reconciliacion semanal).",
+    )
     args = parser.parse_args()
 
     env = load_env(Path(args.env_file))
@@ -326,7 +330,11 @@ def main() -> int:
         jrm_conn.commit()
 
         watermark = obtener_watermark(jrm_cur)
-        desde = (watermark or datetime.date(1900, 1, 1)) - datetime.timedelta(days=MARGEN_DIAS)
+        if args.reconciliar:
+            desde = datetime.date(1900, 1, 1)
+            print("Modo RECONCILIACION: se extrae todo el historico (se ignora el watermark).")
+        else:
+            desde = (watermark or datetime.date(1900, 1, 1)) - datetime.timedelta(days=MARGEN_DIAS)
         desde_yyyymmdd = int(desde.strftime("%Y%m%d"))
         print(f"Watermark actual ({PROCESO_WATERMARK}): {watermark} -> extrayendo desde {desde} (margen {MARGEN_DIAS}d)")
 

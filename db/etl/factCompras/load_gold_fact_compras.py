@@ -62,6 +62,12 @@ def registrar_proceso(cur: pyodbc.Cursor) -> int:
     return cur.fetchone()[0]
 
 
+def obtener_watermark(cur: pyodbc.Cursor):
+    cur.execute("EXEC dbo.usp_Etl_WatermarkObtener @Proceso = ?", PROCESO)
+    row = cur.fetchone()
+    return row.UltimaCargaFechaHora if row else None
+
+
 def finalizar_run(cur, run_id, estado, **kwargs):
     cur.execute(
         """
@@ -80,6 +86,10 @@ def finalizar_run(cur, run_id, estado, **kwargs):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
+    parser.add_argument(
+        "--reconciliar", action="store_true",
+        help="Ignora el watermark y recorre todo [int] (reconciliacion semanal).",
+    )
     args = parser.parse_args()
 
     env = load_env(Path(args.env_file))
@@ -90,17 +100,25 @@ def main() -> int:
     registrar_proceso(cur)
     conn.commit()
 
+    ultimo_watermark = None if args.reconciliar else obtener_watermark(cur)
+    conn.commit()
+
     cur.execute("EXEC dbo.usp_Etl_RunIniciar @Proceso = ?", PROCESO)
     run_id = cur.fetchone()[0]
     conn.commit()
-    print(f"RunId: {run_id}")
+    modo = "RECONCILIACION (todo [int])" if args.reconciliar else f"incremental desde {ultimo_watermark}"
+    print(f"RunId: {run_id} / Modo: {modo}")
 
     try:
-        cur.execute("EXEC dw.usp_MergeFactCompras @RunId = ?", run_id)
-        filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas = cur.fetchone()
+        cur.execute(
+            "EXEC dw.usp_MergeFactCompras @RunId = ?, @UltimoWatermark = ?, @Reconciliar = ?",
+            run_id, ultimo_watermark, 1 if args.reconciliar else 0,
+        )
+        filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas, nuevo_watermark = cur.fetchone()
         print(
             f"Leidas: {filas_leidas} / Insertadas: {filas_insertadas} / "
-            f"Actualizadas: {filas_actualizadas} / Sin cambio: {filas_ignoradas}"
+            f"Actualizadas: {filas_actualizadas} / Sin cambio: {filas_ignoradas} / "
+            f"Nuevo watermark: {nuevo_watermark}"
         )
 
         finalizar_run(
@@ -110,7 +128,7 @@ def main() -> int:
         )
         cur.execute(
             "EXEC dbo.usp_Etl_WatermarkActualizar @Proceso = ?, @NuevaFechaHora = ?, @TipoCarga = ?",
-            PROCESO, datetime.datetime.now(), "Incremental",
+            PROCESO, nuevo_watermark, "Incremental",
         )
         conn.commit()
     except Exception as exc:

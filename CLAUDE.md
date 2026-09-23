@@ -64,4 +64,13 @@ Patrón estándar en cada script: `registrar_proceso()` -> `iniciar_run()` -> tr
 - Nombres de funciones/variables/comentarios en español; identificadores SQL en PascalCase.
 - DB2 for i (AS400) no soporta corchetes para identificadores — usar comillas dobles en las queries contra el origen.
 - Un pipeline nuevo por tabla vive en su propia carpeta `db/etl/<Tabla>/`, replicando los tres scripts (`extract_`, `load_silver_`, `load_gold_`) y las 4 migraciones correspondientes (int DDL, int SP, dw DDL, dw SP).
-- Todas las dimensiones existentes se cargan FULL. La primera tabla de hechos del proyecto (`factEnvios`, envíos) está en progreso y puede requerir carga incremental en vez de FULL — confirmar antes de replicar el patrón FULL tal cual.
+- Las dimensiones se cargan FULL. Los hechos son incrementales (ver "Hechos incrementales" abajo), salvo `factEnvios`, cuyo extract es FULL porque el origen no tiene fecha de modificación confiable (211k filas).
+
+### Hechos incrementales (ventas, compras, envíos)
+
+Flujo completo con `python db/etl/run_fact.py <ventas|compras|envios> [--env-file ...]` (corre extract -> silver -> gold en orden y se detiene al primer error).
+
+- **Extract (Bronze):** ventana de `MARGEN_DIAS = 30` hacia atrás desde el watermark compartido `Ventas`/`Compras`. Encabezados y líneas usan **el mismo** watermark a propósito: silver cruza líneas con encabezados, y con ventanas distintas las líneas quedarían con columnas de encabezado en NULL. Solo silver avanza ese watermark (con el `MAX` real de fecha en `[int]`); los extracts solo lo leen.
+- **Silver:** `load_silver_fact_ventas/compras.py` verifica antes de mezclar que los dos extracts terminaron en `EXITO`/`ADVERTENCIA` y se corrieron después del último silver exitoso; si no, aborta sin tocar datos ni watermark.
+- **Gold:** incremental real, con watermark propio (`Ventas_Gold`, `Compras_Gold`, `Envios_Gold`) = `MAX(FechaCargaInt)` de lo ya procesado, no la hora del cliente. `dw.usp_MergeFact*` procesa solo `[int]` con `FechaCargaInt > watermark`.
+- **Reconciliación semanal:** `run_fact.py <flujo> --reconciliar` extrae todo el histórico (ignora el watermark) y hace que gold recorra todo `[int]`. Captura ediciones/altas tardías fuera de la ventana de 30 días y rellena llaves de dimensión (`EmpresaKey`, `ProductoKey`, `ProveedorKey`) que quedaron NULL por llegada tardía. **No propaga borrados del origen** (silver no da de baja lo que desaparece del AS400; solo `factEnvios` lo hace, por ser FULL).

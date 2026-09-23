@@ -83,6 +83,44 @@ def finalizar_run(cur, run_id, estado, **kwargs):
     )
 
 
+def verificar_extracts_completos(cur: pyodbc.Cursor, extracts: list) -> None:
+    """Aborta si los extracts (encabezados + lineas) no estan completos y frescos.
+
+    Ambos extracts deben usar la misma ventana (el mismo watermark) porque el
+    merge Silver cruza lineas con encabezados; si uno fallo a medias o no se
+    corrio desde el ultimo Silver exitoso, mezclar y avanzar el watermark
+    dejaria datos perdidos o encabezados NULL en las lineas.
+    """
+    cur.execute(
+        """
+        SELECT TOP 1 r.FechaInicio FROM dbo.EtlRunLog r
+        JOIN dbo.EtlProcess p ON p.ProcesoId = r.ProcesoId
+        WHERE p.ProcesoNombre = ? AND r.Estado = 'EXITO' ORDER BY r.RunId DESC
+        """,
+        PROCESO,
+    )
+    row = cur.fetchone()
+    ultimo_silver = row[0] if row else None
+
+    for extract in extracts:
+        cur.execute(
+            """
+            SELECT TOP 1 r.Estado, r.FechaFin FROM dbo.EtlRunLog r
+            JOIN dbo.EtlProcess p ON p.ProcesoId = r.ProcesoId
+            WHERE p.ProcesoNombre = ? ORDER BY r.RunId DESC
+            """,
+            extract,
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError(f"El extract {extract} nunca se ha corrido; no se puede ejecutar Silver.")
+        estado, fecha_fin = row
+        if estado not in ("EXITO", "ADVERTENCIA"):
+            raise RuntimeError(f"La ultima corrida del extract {extract} termino en estado {estado}; corrigela antes de Silver.")
+        if ultimo_silver is not None and fecha_fin is not None and fecha_fin <= ultimo_silver:
+            raise RuntimeError(f"El extract {extract} no se ha vuelto a correr desde el ultimo Silver exitoso.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
@@ -103,6 +141,7 @@ def main() -> int:
     print(f"RunId: {run_id}")
 
     try:
+        verificar_extracts_completos(cur, ["Ventas_Encabezados", "Ventas_Lineas"])
         cur.execute("EXEC [int].usp_MergeFactVentas @RunId = ?", run_id)
         filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas = cur.fetchone()
         print(
