@@ -66,6 +66,11 @@ Patrón estándar en cada script: `registrar_proceso()` -> `iniciar_run()` -> tr
 - Un pipeline nuevo por tabla vive en su propia carpeta `db/etl/<Tabla>/`, replicando los tres scripts (`extract_`, `load_silver_`, `load_gold_`) y las 4 migraciones correspondientes (int DDL, int SP, dw DDL, dw SP).
 - Las dimensiones se cargan FULL. Los hechos son incrementales (ver "Hechos incrementales" abajo), salvo `factEnvios`, cuyo extract es FULL porque el origen no tiene fecha de modificación confiable (211k filas).
 
+### Monitoreo y dimensiones de referencia
+
+- **Alertas:** `python db/monitor_etl.py [--env-file .env.prod] [--horas-sin-exito N]` consulta `dbo.usp_Etl_AlertasObtener` (errores sin corrida exitosa posterior, corridas colgadas, rechazos, descuadres), imprime el reporte y sale con código 1 si hay alertas críticas. Notifica por webhook o correo si se configuran las variables `ALERT_*` del `.env` (ver `.env.example`).
+- **Geografía:** `dimDepartamento`/`dimMunicipio` no vienen del AS400. Se cargan con `python db/etl/dimGeografia/load_dim_geografia.py` (SPs `dw.usp_MergeDimDepartamento`/`usp_MergeDimMunicipio`, migración 141), **después de `dimPais`**. Es un MERGE idempotente que falla con mensaje claro si falta la dimensión padre. La siembra de las migraciones 133/134 queda como histórico y no debe usarse como mecanismo de carga.
+
 ### Hechos incrementales (ventas, compras, envíos)
 
 Flujo completo con `python db/etl/run_fact.py <ventas|compras|envios> [--env-file ...]` (corre extract -> silver -> gold en orden y se detiene al primer error).
