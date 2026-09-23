@@ -35,16 +35,9 @@ def load_env(path: Path) -> dict:
 
 
 def build_connection(env: dict) -> pyodbc.Connection:
-    server = env["JAREMAR_SERVER"]
-    # Con instancia con nombre (server\instancia) no forzamos el puerto: la instancia
-    # suele escuchar en un puerto dinámico y SQL Browser lo resuelve solo. Si se fuerza
-    # ",puerto" el driver conecta por TCP directo a ese puerto, que puede ser el de otra
-    # instancia (ej. la default en 1433), y falla el login con un 18456 engañoso.
-    if "\\" not in server:
-        server = f"{server},{env['JAREMAR_PORT']}"
     conn_str = (
         f"DRIVER={{{env['JAREMAR_ODBC_DRIVER']}}};"
-        f"SERVER={server};"
+        f"SERVER={env['JAREMAR_SERVER']},{env['JAREMAR_PORT']};"
         f"DATABASE={env['JAREMAR_DATABASE']};"
     )
     if env.get("JAREMAR_AUTH_MODE", "sql").lower() == "windows":
