@@ -14,7 +14,7 @@ No hay build ni tests automatizados; el trabajo es escribir scripts Python de ex
 cp .env.example .env   # completar credenciales AS400 y JAREMAR (SQL Server)
 ```
 
-Variables clave en `.env`: `JAREMAR_SERVER`, `JAREMAR_PORT`, `JAREMAR_DATABASE`, `JAREMAR_AUTH_MODE` (`sql` o `windows`), `JAREMAR_USER`/`JAREMAR_PASSWORD`, `JAREMAR_ODBC_DRIVER`; `AS400_HOST`, `AS400_USER`, `AS400_PASSWORD`, `AS400_DRIVER`. No hay `requirements.txt`; la única dependencia externa es `pyodbc`.
+Variables clave en `.env`: `JAREMAR_SERVER`, `JAREMAR_PORT`, `JAREMAR_DATABASE`, `JAREMAR_AUTH_MODE` (`sql` o `windows`), `JAREMAR_USER`/`JAREMAR_PASSWORD`, `JAREMAR_ODBC_DRIVER`; `AS400_HOST`, `AS400_USER`, `AS400_PASSWORD`, `AS400_DRIVER`. No hay `requirements.txt`; la dependencia externa es `pyodbc` (más `openpyxl`, solo para el cargador del plan de generación desde Excel).
 
 ## Comandos
 
@@ -70,6 +70,14 @@ Patrón estándar en cada script: `registrar_proceso()` -> `iniciar_run()` -> tr
 
 - **Alertas:** `python db/monitor_etl.py [--env-file .env.prod] [--horas-sin-exito N]` consulta `dbo.usp_Etl_AlertasObtener` (errores sin corrida exitosa posterior, corridas colgadas, rechazos, descuadres), imprime el reporte y sale con código 1 si hay alertas críticas. Notifica por webhook o correo si se configuran las variables `ALERT_*` del `.env` (ver `.env.example`).
 - **Geografía:** `dimDepartamento`/`dimMunicipio` no vienen del AS400. Se cargan con `python db/etl/dimGeografia/load_dim_geografia.py` (SPs `dw.usp_MergeDimDepartamento`/`usp_MergeDimMunicipio`, migración 141), **después de `dimPais`**. Es un MERGE idempotente que falla con mensaje claro si falta la dimensión padre. La siembra de las migraciones 133/134 queda como histórico y no debe usarse como mecanismo de carga.
+
+### Plan de generación de energía (carga desde Excel)
+
+`python db/etl/dimPlanGeneracion/cargar_plan_generacion.py --archivo "<Reporte Ejecutivo>.xlsx" --version <V> [--fuente ...] [--anio 2026] [--dry-run] [--env-file ...]`. Lee las hojas `Plan_Anual` (kWh del mes por **plantel**: Km 13.5 y Km 15) y `PI` (capacidad DC/AC de cada punto de interconexión), valida y carga `stg` -> `[int]` -> `dw` (`dimPlanGeneracionMensual`, `dimPlantaSolar`, migraciones 149-154). Es un solo script (no hay extract del AS400).
+
+- **Validación antes de escribir:** 12 meses completos por plantel, valores numéricos >= 0, cabeceras esperadas, PI conocidos (mapeo PI -> sitio en `SITIO_POR_PI` del script), un solo año. Un plantel con toda su columna vacía se omite (no es lo mismo que plan en 0); si hay errores no se escribe nada. Avisa (sin bloquear) si el PR implícito contra `dimGhiPlanDaily` queda fuera de 0.70-0.90.
+- **Versiones:** cada carga lleva `--version`; cargar una versión nueva deja la anterior como histórica (`EsVigente = 0`). Recargar la misma versión es idempotente.
+- **Plan diario:** `dw.vwPlanDiarioPlantel` (plan del mes / días) y `dw.vwPlanDiarioPI` (repartido por `CapacidadDcKwp` dentro del plantel). Cuadran: suma de PI = plan del plantel. **Origen del plan:** el propio Excel; el equipo de planta define a mano los kWh mensuales de cada plantel (`--fuente` por defecto: 'Solar Jaremar - Reporte Ejecutivo'). El Excel original (2026-08) tenía un error en las fórmulas de `Plan_Diario_PI` de MARGARINA, DETERGENTE (usaban el plan de Km 15, están en Km 13.5) y EDIF ADMIN (usaba Km 13.5, está en Km 15), por lo que sus cifras por PI no cuadraban con el plan del plantel ni con estas vistas; se corrigió en la copia '(corregido)'. `Plan_Anual` y `PI`, que son lo que lee el cargador, no cambiaron.
 
 ### Hechos incrementales (ventas, compras, envíos)
 
