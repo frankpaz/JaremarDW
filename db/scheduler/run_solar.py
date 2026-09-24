@@ -7,9 +7,9 @@ dentro de un grupo, cada paso depende del anterior (dispositivos <- planta/estac
 hechos <- dispositivos), asi que ante el primer error se detiene ese grupo.
 
 Uso:
-    python db/etl/run_solar.py --env-file .env.prod                 # corrida normal (la que programa el Programador de tareas)
-    python db/etl/run_solar.py --env-file .env.prod --solo sma meteo # solo esos grupos
-    python db/etl/run_solar.py --dry-run                            # muestra el plan y verifica que existan los scripts
+    python db/scheduler/run_solar.py --env-file .env.prod                 # corrida normal (la que programa el Programador de tareas)
+    python db/scheduler/run_solar.py --env-file .env.prod --solo sma meteo # solo esos grupos
+    python db/scheduler/run_solar.py --dry-run                            # muestra el plan y verifica que existan los scripts
 
 Codigos de salida:
     0  todo correcto        1  algun paso fallo      2  ya hay otra corrida en curso
@@ -27,8 +27,8 @@ import sys
 import time
 from pathlib import Path
 
-ETL = Path(__file__).resolve().parent
-ROOT = ETL.parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
+ETL = ROOT / "db" / "etl"
 MONITOR = ROOT / "db" / "monitor_etl.py"
 LOG_DIR_DEFECTO = ROOT / "logs"
 

@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Crea dos tareas:
-    JaremarDW-Solar            corre db\etl\run_solar.py (silver+gold de las 15 tablas solares + monitor)
+    JaremarDW-Solar            corre db\scheduler\run_solar.py (silver+gold de las 15 tablas solares + monitor)
                                a las horas de -Horas (default 10:30, 17:30, 20:30 hora local del equipo).
     JaremarDW-Solar-Vigilante  corre db\monitor_etl.py acotado a Solar a las 12:00 y 22:00, para avisar
                                si el orquestador no corrio o se colgo (alerta SIN_EXITO a 16 h).
@@ -71,7 +71,7 @@ if (-not $Python) {
 }
 if (-not (Test-Path $Python)) { throw "No existe el ejecutable de Python: $Python" }
 
-$scriptRun = Join-Path $RutaRepo 'db\etl\run_solar.py'
+$scriptRun = Join-Path $RutaRepo 'db\scheduler\run_solar.py'
 $scriptMon = Join-Path $RutaRepo 'db\monitor_etl.py'
 foreach ($f in $scriptRun, $scriptMon) { if (-not (Test-Path $f)) { throw "No existe: $f" } }
 
@@ -106,7 +106,7 @@ function Nueva-Tarea([string]$nombre, [string]$argumentos, [string[]]$horas, [in
     }
 }
 
-Nueva-Tarea $NombrePrincipal $argPrincipal $Horas 60 'JaremarDW: silver+gold del dominio Solar y monitor de alertas (db\etl\run_solar.py).'
+Nueva-Tarea $NombrePrincipal $argPrincipal $Horas 60 'JaremarDW: silver+gold del dominio Solar y monitor de alertas (db\scheduler\run_solar.py).'
 Nueva-Tarea $NombreVigilante $argVigilante $HorasVigilante 15 'JaremarDW: vigilante del dominio Solar; avisa si no hay corridas exitosas en 16 h.'
 
 Write-Host "`nPython : $Python`nRepo   : $RutaRepo`nEntorno: $envRuta"

@@ -93,9 +93,11 @@ Flujo completo con `python db/etl/run_fact.py <ventas|compras|envios> [--env-fil
 
 ### Programación del dominio Solar
 
+**Todo lo que se programe para ejecución desatendida vive en `db/scheduler/`** (orquestadores `run_*.py` y scripts de registro de tareas); su `README.md` explica cómo configurarlo en el Programador de tareas de Windows o en SQL Server Agent.
+
 Lo que deposita el proceso externo en `stg` (SMA, Huawei, Soliscloud, Growatt, meteo) y las 3 dimensiones de referencia se procesan solas con el Programador de tareas de Windows. **No cubre** los flujos AS400 ni las cargas manuales (`dimPlanGeneracion`, geografía).
 
-- **Orquestador:** `python db/etl/run_solar.py [--env-file .env.prod] [--solo sma huawei soliscloud growatt meteo referencia] [--dry-run] [--sin-monitor]`. Corre silver y luego gold de cada tabla (30 pasos, ~1-2 min). Los grupos son independientes: un fallo detiene solo su grupo (los dispositivos dependen de sus plantas/estaciones y los hechos de sus dispositivos). Al final corre `monitor_etl.py` acotado a los procesos solares.
+- **Orquestador:** `python db/scheduler/run_solar.py [--env-file .env.prod] [--solo sma huawei soliscloud growatt meteo referencia] [--dry-run] [--sin-monitor]`. Corre silver y luego gold de cada tabla (30 pasos, ~1-2 min). Los grupos son independientes: un fallo detiene solo su grupo (los dispositivos dependen de sus plantas/estaciones y los hechos de sus dispositivos). Al final corre `monitor_etl.py` acotado a los procesos solares.
 - **Códigos de salida:** `0` ok, `1` algún paso falló, `2` ya hay otra corrida (bloqueo `logs/run_solar.lock`, vence a las 2 h), `3` pasos ok pero el monitor halló alertas críticas.
 - **Registro:** `logs/run_solar_AAAAMMDD_HHMMSS.log` (30 días de retención; `logs/` no se versiona).
 - **Horarios (hora local UTC-6, sin horario de verano):** 10:30, 17:30 y 20:30, cada uno 30-60 min después de un lote de llegada (SMA/Soliscloud 02/13/20 UTC, Huawei 13 UTC, meteo 11 UTC); retraso máximo de datos ~13 h. Vigilante a las 12:00 y 22:00: alerta `SIN_EXITO` si un proceso solar lleva 16 h sin éxito. Si el servidor tiene otra zona horaria, ajustar `-Horas`.
