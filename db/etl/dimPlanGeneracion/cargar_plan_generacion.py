@@ -29,6 +29,10 @@ Si un archivo NUEVO redefine por completo a uno anterior (p.ej. cambia el format
 con que se identifica cada inversor), --reemplaza-version deja esas versiones como historicas
 (EsVigente = 0) aunque el nuevo archivo no cubra exactamente las mismas filas.
 
+--limpiar vacia dimPlanGeneracion (stg, int y dw, con TODO su historial de versiones) justo antes de
+cargar, y solo despues de validar el archivo: sirve para empezar de cero. Es destructivo; sin
+el flag nunca se borra nada.
+
 Requiere openpyxl (solo para este cargador).
 
 Uso:
@@ -259,6 +263,19 @@ def cargar_stg(plan, archivo, fuente, version):
     return fn
 
 
+def limpiar_tablas(cur, run_id):
+    """Vacia dw, int y stg de dimPlanGeneracion. Devuelve (filas dw + int borradas, 0, 0, 0)."""
+    n = 0
+    for tabla in ("dw.dimPlanGeneracion", "[int].dimPlanGeneracion", "stg.dimPlanGeneracion"):
+        cur.execute(f"SELECT COUNT(*) FROM {tabla}")
+        filas = cur.fetchone()[0]
+        if not tabla.startswith("stg"):
+            n += filas
+        cur.execute(f"TRUNCATE TABLE {tabla}")
+        print(f"    {tabla}: {filas} filas eliminadas")
+    return n, 0, 0, 0
+
+
 def retirar_versiones(versiones, version_nueva):
     """Marca como historicas TODAS las filas de las versiones indicadas (silver; gold lo hereda en su merge)."""
     def fn(cur, run_id):
@@ -287,6 +304,8 @@ def main() -> int:
     parser.add_argument("--version", required=True, help="Identificador de la version del plan (ej. V2, 2026-09-23).")
     parser.add_argument("--reemplaza-version", nargs="+", default=[], metavar="VERSION",
                         help="Versiones anteriores que esta carga reemplaza por completo (quedan como historicas).")
+    parser.add_argument("--limpiar", action="store_true",
+                        help="Vacia dimPlanGeneracion (stg, int y dw, con su historial) antes de cargar. Destructivo.")
     parser.add_argument("--hoja", default=HOJA_DEFECTO, help=f"Hoja a leer (default: {HOJA_DEFECTO}).")
     parser.add_argument("--fuente", default=FUENTE_DEFECTO, help=f"Origen del plan (default: '{FUENTE_DEFECTO}').")
     parser.add_argument("--dry-run", action="store_true", help="Solo valida y muestra el resumen; no escribe en la base.")
@@ -341,8 +360,10 @@ def main() -> int:
             ("PlanGeneracion_Silver", ("stg", "dimPlanGeneracion"), ("int", "dimPlanGeneracion"), ejecutar_sp("[int].usp_MergeDimPlanGeneracion")),
             ("PlanGeneracion_Gold", ("int", "dimPlanGeneracion"), ("dw", "dimPlanGeneracion"), ejecutar_sp("dw.usp_MergeDimPlanGeneracion")),
         ]
+        if args.limpiar:
+            pasos.insert(0, ("PlanGeneracion_Limpieza", ("dw", "dimPlanGeneracion"), ("dw", "dimPlanGeneracion"), limpiar_tablas))
         if args.reemplaza_version:
-            pasos.insert(2, ("PlanGeneracion_Reemplazo", ("int", "dimPlanGeneracion"), ("int", "dimPlanGeneracion"),
+            pasos.insert(len(pasos) - 1, ("PlanGeneracion_Reemplazo", ("int", "dimPlanGeneracion"), ("int", "dimPlanGeneracion"),
                              retirar_versiones(args.reemplaza_version, args.version)))
         for proceso, origen, destino, fn in pasos:
             ejecutar_paso(conn, proceso, origen, destino, fn)
