@@ -33,6 +33,8 @@ python db/etl/dimSector/load_gold_dim_sector.py       # Gold: [int] -> dw
 ```
 Todos aceptan `--env-file <ruta>`.
 
+Actualizar todas las dimensiones AS400 de una vez (extract -> silver -> gold de cada una, geografía después de `dimPais`, y monitor al final): `python db/scheduler/run_dimensiones.py [--env-file .env.prod] [--solo viaje ruta ...] [--dry-run]`. **Al crear una dimensión nueva, agregarla a `GRUPOS` y a `PREFIJOS_MONITOR` en ese script.**
+
 ## Arquitectura
 
 ### Las 3 capas

@@ -6,6 +6,7 @@ Aqui viven **todos los procesos pensados para correr desatendidos** (orquestador
 |---|---|
 | `run_solar.py` | Orquestador del dominio Solar: silver + gold de 15 tablas (30 pasos, ~1 min) y, al final, el monitor de alertas acotado a Solar. |
 | `registrar_tareas_solar.ps1` | Registra en el Programador de tareas de Windows la corrida principal y el vigilante. |
+| `run_dimensiones.py` | Orquestador de las dimensiones AS400: extract + silver + gold de 14 dimensiones (44 pasos, ~2 min), geografia al final del grupo `pais`, y el monitor acotado a esos procesos. Mismos codigos de salida que `run_solar.py`; bloqueo `logs/run_dimensiones.lock`, log `logs/run_dimensiones_AAAAMMDD_HHMMSS.log`. **Aun no esta programado.** Al crear una dimension nueva, agregarla a `GRUPOS` y su proceso a `PREFIJOS_MONITOR`. |
 
 El monitor (`db/monitor_etl.py`) es de uso general y se queda en `db/`.
 

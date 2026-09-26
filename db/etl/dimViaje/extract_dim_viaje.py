@@ -2,8 +2,10 @@
 Extraccion Bronze: AS400/LX (PROLXUSRF.ENVU0A44, catalogo de viajes con el
 valor a pagar a motorista y ayudante) -> stg.dimViaje en JAREMAR.
 
-Carga FULL (truncate + insert), sin filtro y sin transformar los datos del
-origen. La estructura de stg.dimViaje se auto-provisiona a partir de la
+Carga FULL (truncate + insert), sin transformar los datos del origen. Solo se
+traen los viajes con VCODPA >= 8000 (8000-9999; VCODPA es DECIMAL(4,0)): son
+los que se usan para relacionar con envios, regla de negocio definida por el
+usuario (2026-09-26); los menores a 8000 no se incluyen. La estructura de stg.dimViaje se auto-provisiona a partir de la
 metadata real de las columnas en el AS400.
 
 Uso:
@@ -23,6 +25,8 @@ SCHEMA_CACHE_DIR = Path(__file__).resolve().parent / "schema_cache"
 PROCESO = "Viaje"
 AS400_ESQUEMA_ORIGEN = "PROLXUSRF"
 AS400_TABLA_ORIGEN = "ENVU0A44"
+FILTRO_COLUMNA = "VCODPA"
+FILTRO_MINIMO = 8000
 STG_ESQUEMA = "stg"
 STG_TABLA = "dimViaje"
 
@@ -216,7 +220,11 @@ def extraer_filas(as400_cur: pyodbc.Cursor, columnas: list) -> list:
     # DB2 for i no soporta comillas cuadradas para identificadores (eso es
     # sintaxis de SQL Server) -- se usan comillas dobles.
     nombres = ", ".join(f'"{c["nombre"]}"' for c in columnas)
-    as400_cur.execute(f'SELECT {nombres} FROM {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN}')
+    as400_cur.execute(
+        f'SELECT {nombres} FROM {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN} '
+        f'WHERE "{FILTRO_COLUMNA}" >= ?',
+        FILTRO_MINIMO,
+    )
     return as400_cur.fetchall()
 
 
