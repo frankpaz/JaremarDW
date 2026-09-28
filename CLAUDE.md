@@ -35,6 +35,10 @@ Todos aceptan `--env-file <ruta>`.
 
 Actualizar todas las dimensiones AS400 de una vez (extract -> silver -> gold de cada una, geografía después de `dimPais`, y monitor al final): `python db/scheduler/run_dimensiones.py [--env-file .env.prod] [--solo viaje ruta ...] [--dry-run]`. **Al crear una dimensión nueva, agregarla a `GRUPOS` y a `PREFIJOS_MONITOR` en ese script.**
 
+## Documentos de estado
+
+Los resúmenes de estado que se pidan se guardan en `docs/estado/` como `<solicitud>_AAAAMMDD_HHMMSS.md` (solicitud en minúsculas con guiones bajos; fecha y hora local de generación). Cada archivo es una foto de ese momento: no se edita después, se crea uno nuevo. Las cifras se consultan en producción al generarlo.
+
 ## Arquitectura
 
 ### Las 3 capas
