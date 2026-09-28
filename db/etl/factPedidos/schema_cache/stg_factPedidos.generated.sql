@@ -1,0 +1,28 @@
+IF NOT EXISTS (
+    SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE s.name = 'stg' AND t.name = 'factPedidos'
+)
+BEGIN
+    CREATE TABLE stg.factPedidos (
+    [D02CIA] DECIMAL(2,0) NULL,
+    [D02ORD] DECIMAL(8,0) NULL,
+    [D02CLI] DECIMAL(8,0) NULL,
+    [D02LIN] DECIMAL(4,0) NULL,
+    [D02PRO] NVARCHAR(35) NULL,
+    [D02CAN] DECIMAL(11,3) NULL,
+    [D02PES] DECIMAL(12,2) NULL,
+    [D02ALM] NVARCHAR(3) NULL,
+    [D02LOC] NVARCHAR(10) NULL,
+    [D02UM] NVARCHAR(2) NULL,
+    [D02REF] NVARCHAR(15) NULL,
+    [D02CON] DECIMAL(6,0) NULL,
+    [D02DSR] NVARCHAR(6) NULL,
+    [D02DSS] NVARCHAR(6) NULL,
+    [D02DST] NVARCHAR(6) NULL,
+    [D02MAR] NVARCHAR(1) NULL,
+    [D02FEC] DECIMAL(8,0) NULL,
+    [D02HOR] DECIMAL(6,0) NULL,
+    [FechaCargaStg] DATETIME2(7) NOT NULL CONSTRAINT DF_factPedidos_FechaCargaStg DEFAULT (SYSDATETIME()),
+    [RunId] INT NULL
+    );
+END
