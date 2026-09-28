@@ -88,6 +88,8 @@ Patrón estándar en cada script: `registrar_proceso()` -> `iniciar_run()` -> tr
 
 Flujo completo con `python db/etl/run_fact.py <ventas|compras|envios> [--env-file ...]` (corre extract -> silver -> gold en orden y se detiene al primer error).
 
+**Ventas programada:** `python db/scheduler/run_ventas.py [--env-file .env.prod] [--reconciliar] [--solo empresas producto ventas] [--dry-run]` actualiza `dimEmpresas` y `dimProducto`, corre el flujo de ventas y el monitor. Se registra con `db/scheduler/registrar_tareas_ventas.ps1`: `JaremarDW-Ventas` a las 05:00 (excepto domingo) y 13:00, `JaremarDW-Ventas-Reconciliar` el domingo a las 02:00 y `JaremarDW-Ventas-Vigilante` a las 07:00 y 15:00 (alerta `SIN_EXITO` a 6 h, medido desde el inicio del último éxito; si se cambian las horas de ventas, revisar las del vigilante). Codigos de salida iguales a `run_solar.py`; bloqueo `logs/run_ventas.lock`.
+
 - **Extract (Bronze):** ventana de `MARGEN_DIAS = 30` hacia atrás desde el watermark compartido `Ventas`/`Compras`. Encabezados y líneas usan **el mismo** watermark a propósito: silver cruza líneas con encabezados, y con ventanas distintas las líneas quedarían con columnas de encabezado en NULL. Solo silver avanza ese watermark (con el `MAX` real de fecha en `[int]`); los extracts solo lo leen.
 - **Silver:** `load_silver_fact_ventas/compras.py` verifica antes de mezclar que los dos extracts terminaron en `EXITO`/`ADVERTENCIA` y se corrieron después del último silver exitoso; si no, aborta sin tocar datos ni watermark.
 - **Gold:** incremental real, con watermark propio (`Ventas_Gold`, `Compras_Gold`, `Envios_Gold`) = `MAX(FechaCargaInt)` de lo ya procesado, no la hora del cliente. `dw.usp_MergeFact*` procesa solo `[int]` con `FechaCargaInt > watermark`.

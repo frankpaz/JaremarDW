@@ -148,17 +148,21 @@ def ejecutar_subproceso(cmd: list, timeout: int) -> tuple:
 
 def correr(grupos: list, env_file: str, log: Registro, timeout_paso: int = TIMEOUT_PASO_DEFECTO, ejecutor=ejecutar_subproceso,
            pasos_por_grupo=pasos_del_grupo) -> list:
-    """Corre los grupos en orden. Un fallo detiene SOLO su grupo. Devuelve una fila por paso."""
+    """Corre los grupos en orden. Un fallo detiene SOLO su grupo. Devuelve una fila por paso.
+
+    Cada paso es (etiqueta, script) o (etiqueta, script, [argumentos extra])."""
     resultados = []
     for grupo in grupos:
         log(f"\n##### Grupo {grupo} #####")
         fallo_previo = False
-        for etiqueta, script in pasos_por_grupo(grupo):
+        for paso in pasos_por_grupo(grupo):
+            etiqueta, script = paso[0], paso[1]
+            extra = list(paso[2]) if len(paso) > 2 else []
             if fallo_previo:
                 resultados.append({"grupo": grupo, "paso": etiqueta, "estado": "OMITIDO", "rc": None, "seg": 0.0})
                 log(f"--- {etiqueta}: OMITIDO (fallo anterior en el grupo)")
                 continue
-            cmd = [sys.executable, str(script)] + (["--env-file", env_file] if env_file else [])
+            cmd = [sys.executable, str(script)] + (["--env-file", env_file] if env_file else []) + extra
             rc, salida, seg = ejecutor(cmd, timeout_paso)
             estado = "OK" if rc == 0 else "FALLO"
             resultados.append({"grupo": grupo, "paso": etiqueta, "estado": estado, "rc": rc, "seg": seg})

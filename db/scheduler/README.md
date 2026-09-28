@@ -7,6 +7,8 @@ Aqui viven **todos los procesos pensados para correr desatendidos** (orquestador
 | `run_solar.py` | Orquestador del dominio Solar: silver + gold de 15 tablas (30 pasos, ~1 min) y, al final, el monitor de alertas acotado a Solar. |
 | `registrar_tareas_solar.ps1` | Registra en el Programador de tareas de Windows la corrida principal y el vigilante. |
 | `run_dimensiones.py` | Orquestador de las dimensiones AS400: extract + silver + gold de 15 dimensiones (47 pasos, ~3 min), geografia al final del grupo `pais`, y el monitor acotado a esos procesos. Mismos codigos de salida que `run_solar.py`; bloqueo `logs/run_dimensiones.lock`, log `logs/run_dimensiones_AAAAMMDD_HHMMSS.log`. **Aun no esta programado.** Al crear una dimension nueva, agregarla a `GRUPOS` y su proceso a `PREFIJOS_MONITOR`. |
+| `run_ventas.py` | Orquestador de ventas: `dimEmpresas` + `dimProducto` (para que gold resuelva las llaves) y luego el hecho de ventas (extract encabezados -> extract lineas -> silver -> gold), y el monitor acotado a `Ventas Empresas EmpresaMoneda Producto` (`--horas-sin-exito 26`). Si una dimension falla, ventas corre igual; dentro de ventas se detiene al primer error. `--reconciliar` extrae todo el historico (limite 3600 s por paso; 1800 s en la diaria). Bloqueo `logs/run_ventas.lock` (compartido por la diaria y la reconciliacion), log `logs/run_ventas_AAAAMMDD_HHMMSS.log`. Los pasos salen de `db/etl/run_fact.py` y de `run_dimensiones.py`. |
+| `registrar_tareas_ventas.ps1` | Registra `JaremarDW-Ventas` (diaria), `JaremarDW-Ventas-Reconciliar` (semanal) y `JaremarDW-Ventas-Vigilante`. Mismas opciones que el de Solar, mas `-DiaReconciliar`, `-HoraReconciliar`, `-HorasVigilante` y `-HorasSinExitoVigilante`. |
 
 El monitor (`db/monitor_etl.py`) es de uso general y se queda en `db/`.
 
@@ -16,8 +18,15 @@ El monitor (`db/monitor_etl.py`) es de uso general y se queda en `db/`.
 |---|---|---|
 | Corrida principal | 10:30, 17:30, 20:30 | `python db/scheduler/run_solar.py --env-file .env.prod` |
 | Vigilante | 12:00, 22:00 | `python db/monitor_etl.py --env-file .env.prod --procesos Sma Huawei Soliscloud Growatt Meteo DeviceCapacity GhiPlan GsaMonthly --horas-sin-exito 16 --sin-repetir-horas 12` |
+| Ventas diaria | 05:00 (excepto domingo) y 13:00 | `python db/scheduler/run_ventas.py --env-file .env.prod` |
+| Ventas reconciliacion | domingo 02:00 | `python db/scheduler/run_ventas.py --env-file .env.prod --reconciliar` |
+| Ventas vigilante | 07:00, 15:00 | `python db/monitor_etl.py --env-file .env.prod --procesos Ventas Empresas EmpresaMoneda Producto --horas-sin-exito 6 --sin-repetir-horas 12` |
 
-Las horas caen 30-60 min despues de cada lote que deposita el proceso externo (SMA/Soliscloud 02/13/20 UTC, Huawei 13 UTC, meteo 11 UTC). **Si el servidor no esta en UTC-6, ajustar las horas.**
+Ventas se registra aparte con `.\db\scheduler\registrar_tareas_ventas.ps1` (acepta `-WhatIf`, `-Usuario/-Credencial`, `-Deshabilitada`, `-Desinstalar`, `-Horas`, `-DiaReconciliar`, `-HoraReconciliar`, `-HorasVigilante`, `-HorasSinExitoVigilante`). El dia de la reconciliacion se omiten las horas diarias que caen en las 6 h siguientes a ella. La diaria y la reconciliacion tienen limite de 2 h, igual que el vencimiento del bloqueo.
+
+El vigilante corre 2 h despues de cada corrida diaria. `SIN_EXITO` se mide desde el **inicio** del ultimo exito: lo normal a esa hora es <= 2 h (<= 5 h el domingo, por la reconciliacion de las 02:00), y si una corrida no se hizo, fallo o quedo bloqueada, pasa a 10-18 h; por eso el umbral es 6 h. **Si se cambian las horas de ventas, revisar las del vigilante y el umbral.** El monitor que corre al final de cada corrida usa 26 h.
+
+Las horas de Solar caen 30-60 min despues de cada lote que deposita el proceso externo (SMA/Soliscloud 02/13/20 UTC, Huawei 13 UTC, meteo 11 UTC). **Si el servidor no esta en UTC-6, ajustar las horas.**
 
 Codigos de salida de `run_solar.py`: `0` ok, `1` un paso fallo, `2` ya habia otra corrida (bloqueo `logs/run_solar.lock`, vence a las 2 h), `3` pasos ok pero el monitor hallo alertas criticas. Log por corrida: `logs/run_solar_AAAAMMDD_HHMMSS.log` (30 dias).
 
@@ -107,4 +116,4 @@ Sin Python en el servidor no hay equivalente 100 % T-SQL: los scripts `load_silv
 
 - Si el servidor esta apagado, ni la corrida ni el vigilante avisan (viven en el mismo equipo). Mitigacion opcional: correr el monitor desde otro equipo.
 - La alerta `SIN_EXITO` mide corridas propias, no la frescura de `stg`; si el proceso externo deja de depositar datos, no se detecta.
-- No cubre los flujos AS400 ni las cargas manuales (`dimPlanGeneracion`, geografia).
+- Solar no cubre los flujos AS400 ni las cargas manuales (`dimPlanGeneracion`, geografia). De los hechos AS400 solo ventas esta programado (compras y envios aun no).
