@@ -1,14 +1,15 @@
 """
-Extraccion Bronze: AS400/LX (PROLX835F.AVM, VMID='VM') -> stg.dimProveedor en
-JAREMAR.
+Extraccion Bronze: AS400/LX (PROLX835F.AVM, VMID IN ('VM','VZ')) -> stg.dimProveedor
+en JAREMAR.
 
 AVM es el maestro de proveedores del ERP (Infor Distribution SX.e), con 144
 columnas y dos poblaciones disjuntas bajo el mismo archivo fisico (VMID='VM'
 vs 'VZ', 0 VENDOR en comun -- confirmado con
-db/discovery/discover_columnas.py, igual patron que RCM/dimCliente). Se uso
-VMID='VM' porque el 98.9% de los proveedores que aparecen en compras
-(PROLX835F.APL.PLVNDR, "Payables Line File") coinciden con esa poblacion,
-contra apenas ~1% con 'VZ'.
+db/discovery/discover_columnas.py, igual patron que RCM/dimCliente). Hasta el
+2026-09-28 solo se cargaba 'VM'; desde entonces se cargan las dos, con VMID
+como columna: 'VZ' son proveedores dados de baja (5.649) que siguen en compras
+emitidas cuando estaban activos (151 proveedores / 412 lineas de factCompras).
+En dw.dimProveedor se expone como EsActivo (VM = 1, VZ = 0).
 
 Columnas elegidas tras analisis de poblacion real sobre 19789 filas
 (2026-09-22, ver db/discovery/discover_columnas.py --poblacion): se
@@ -17,8 +18,8 @@ VMI, campos bancarios/direcciones secundarias de compras poco usados). A
 diferencia de RCM, AVM no tiene columnas de auditoria de creacion/entrada
 (no existe equivalente a CMDCRT/CMENDT/CMENTM/CMENUS).
 
-Carga FULL (truncate + insert). VENDOR es unico dentro de VMID='VM'
-(19789 filas = 19789 VENDOR distintos, verificado).
+Carga FULL (truncate + insert). VENDOR es unico en VM + VZ juntos (0 codigos
+repetidos entre ambas poblaciones, verificado 2026-09-28).
 
 Uso:
     python db/etl/dimProveedor/extract_dim_proveedor.py [--env-file .env]
@@ -38,12 +39,14 @@ PROCESO = "Proveedor"
 AS400_ESQUEMA_ORIGEN = "PROLX835F"
 AS400_TABLA_ORIGEN = "AVM"
 FILTRO_COLUMNA = "VMID"
-FILTRO_VALOR = "VM"
+# VM = proveedor activo, VZ = dado de baja (decision del usuario 2026-09-28, igual que
+# dimCliente): se cargan ambos para que las compras no pierdan el proveedor.
+FILTRO_VALORES = ("VM", "VZ")
 STG_ESQUEMA = "stg"
 STG_TABLA = "dimProveedor"
 
 COLUMNAS_DESEADAS = [
-    "VENDOR", "VNDNAM", "VNALPH",
+    "VMID", "VENDOR", "VNDNAM", "VNALPH",
     "VNDAD1", "VNDAD2", "VSTATE", "VCOUN",
     "VTYPE", "VCMPNY",
     "VTERMS", "VPAYTO", "VCURR", "VPAYTY", "V1TIME", "VCON", "VPHONE",
@@ -233,8 +236,8 @@ def extraer_filas(as400_cur: pyodbc.Cursor, columnas: list) -> list:
     nombres = ", ".join(f'"{c["nombre"]}"' for c in columnas)
     as400_cur.execute(
         f'SELECT {nombres} FROM {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN} '
-        f'WHERE "{FILTRO_COLUMNA}" = ?',
-        FILTRO_VALOR,
+        f'WHERE "{FILTRO_COLUMNA}" IN ({", ".join("?" for _ in FILTRO_VALORES)})',
+        *FILTRO_VALORES,
     )
     return as400_cur.fetchall()
 

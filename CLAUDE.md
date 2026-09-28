@@ -68,6 +68,7 @@ Patrón estándar en cada script: `registrar_proceso()` -> `iniciar_run()` -> tr
 - Un pipeline nuevo por tabla vive en su propia carpeta `db/etl/<Tabla>/`, replicando los tres scripts (`extract_`, `load_silver_`, `load_gold_`) y las 4 migraciones correspondientes (int DDL, int SP, dw DDL, dw SP).
 - Las dimensiones se cargan FULL. Los hechos son incrementales (ver "Hechos incrementales" abajo), salvo `factEnvios`, cuyo extract es FULL porque el origen no tiene fecha de modificación confiable (211k filas), y `factGuiasRemision`, que reemplaza una ventana de fechas porque el origen no tiene llave única.
 - `dimCliente` trae **activos y dados de baja** de `PROLX835F.RCM` (`CMID` `CM` y `CZ`, ~137 k; migración 179), porque los documentos siguen usando clientes que después se dan de baja. `dw.dimCliente.EsActivo` = 1 para `CM`, 0 para `CZ`: **para listar solo clientes activos filtrar `EsActivo = 1`**. `EsVigente` sigue indicando si el cliente existe en `RCM`.
+- `dimProveedor` sigue el mismo criterio: `PROLX835F.AVM` con `VMID` `VM` y `VZ` (~25 k; migración 180) y `dw.dimProveedor.EsActivo` (1 = `VM`). En `dimVehiculo` quedan ~555 vehículos con `CodigoProveedor` sin `ProveedorKey`: esos proveedores se **borraron físicamente** de `AVM` (algunos solo dejaron rastro en `AVI`, sin nombre), así que no hay de dónde cargarlos; `EmpresaPropietaria` trae el nombre como texto.
 
 ### Monitoreo y dimensiones de referencia
 
