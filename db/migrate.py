@@ -121,6 +121,11 @@ def main() -> int:
         try:
             for batch in split_batches(text):
                 cur.execute(batch)
+                # Consumir todos los resultados del lote: cada mensaje informativo (ej. el
+                # aviso de sp_rename) o conteo llega como un resultado aparte, y si no se
+                # recorren, SQL Server no ejecuta el resto del lote y el commit lo deja a medias.
+                while cur.nextset():
+                    pass
             cur.execute(
                 "INSERT INTO dbo.SchemaMigrations (MigrationId, Checksum) VALUES (?, ?)",
                 f.name,

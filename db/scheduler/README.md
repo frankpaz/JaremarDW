@@ -13,9 +13,9 @@ Aqui viven **todos los procesos pensados para correr desatendidos** (orquestador
 | `registrar_tareas_guias.ps1` | Registra `JaremarDW-Guias`, `JaremarDW-Guias-Reconciliar` y `JaremarDW-Guias-Vigilante`, con las mismas opciones que el de ventas y horarios 30 min despues. |
 | `run_compras.py` | Orquestador de compras: `dimEmpresas` + `dimProveedor` (las llaves que resuelve el gold), luego el hecho de compras (extract encabezados -> extract lineas -> silver -> gold) y el monitor acotado a `Compras Empresas EmpresaMoneda Proveedor`. Mismo comportamiento, limites y codigos que `run_ventas.py`; bloqueo `logs/run_compras.lock`, log `logs/run_compras_AAAAMMDD_HHMMSS.log`. |
 | `registrar_tareas_compras.ps1` | Registra `JaremarDW-Compras`, `JaremarDW-Compras-Reconciliar` y `JaremarDW-Compras-Vigilante`, con las mismas opciones que el de ventas. |
-| `run_pedidos.py` | Orquestador de pedidos de venta: `dimEmpresas`, `dimCliente`, `dimProducto` y `dimRuta`, luego `factPedidos` (extract -> silver -> gold, ventana de 30 dias por fecha de la orden) y el monitor acotado a `Pedidos Empresas EmpresaMoneda Cliente Producto Ruta`. `--reconciliar` re-extrae todo desde 2026. Bloqueo `logs/run_pedidos.lock`, log `logs/run_pedidos_AAAAMMDD_HHMMSS.log`. |
-| `registrar_tareas_pedidos.ps1` | Registra `JaremarDW-Pedidos`, `JaremarDW-Pedidos-Reconciliar` y `JaremarDW-Pedidos-Vigilante`, con las mismas opciones que el de ventas. |
-| `hecho_programado.py` | Logica comun de `run_ventas.py`, `run_guias.py`, `run_compras.py` y `run_pedidos.py` (dimensiones -> hecho -> monitor, bloqueo, log). Para programar otro hecho AS400, crear un `run_<hecho>.py` con su configuracion (flujo de `run_fact.py`, grupos de `run_dimensiones.py`, prefijos del monitor, limites). |
+| `run_manifiestos.py` | Orquestador de manifiestos (`UNDIS002`): `dimEmpresas`, `dimCliente`, `dimProducto` y `dimRuta`, luego `factManifiestos` (extract -> silver -> gold, ventana de 30 dias por fecha de la orden) y el monitor acotado a `Manifiestos Empresas EmpresaMoneda Cliente Producto Ruta`. `--reconciliar` re-extrae todo desde 2026. Bloqueo `logs/run_manifiestos.lock`, log `logs/run_manifiestos_AAAAMMDD_HHMMSS.log`. |
+| `registrar_tareas_manifiestos.ps1` | Registra `JaremarDW-Manifiestos`, `JaremarDW-Manifiestos-Reconciliar` y `JaremarDW-Manifiestos-Vigilante`, con las mismas opciones que el de ventas. |
+| `hecho_programado.py` | Logica comun de `run_ventas.py`, `run_guias.py`, `run_compras.py` y `run_manifiestos.py` (dimensiones -> hecho -> monitor, bloqueo, log). Para programar otro hecho AS400, crear un `run_<hecho>.py` con su configuracion (flujo de `run_fact.py`, grupos de `run_dimensiones.py`, prefijos del monitor, limites). |
 
 El monitor (`db/monitor_etl.py`) es de uso general y se queda en `db/`.
 
@@ -34,15 +34,15 @@ El monitor (`db/monitor_etl.py`) es de uso general y se queda en `db/`.
 | Compras diaria | 06:00 (excepto domingo) y 14:00 | `python db/scheduler/run_compras.py --env-file .env.prod` |
 | Compras reconciliacion | domingo 04:00 | `python db/scheduler/run_compras.py --env-file .env.prod --reconciliar` |
 | Compras vigilante | 08:00, 16:00 | `python db/monitor_etl.py --env-file .env.prod --procesos Compras Empresas EmpresaMoneda Proveedor --horas-sin-exito 6 --sin-repetir-horas 12` |
-| Pedidos diaria | 06:30 (excepto domingo) y 14:30 | `python db/scheduler/run_pedidos.py --env-file .env.prod` |
-| Pedidos reconciliacion | domingo 05:00 | `python db/scheduler/run_pedidos.py --env-file .env.prod --reconciliar` |
-| Pedidos vigilante | 08:30, 16:30 | `python db/monitor_etl.py --env-file .env.prod --procesos Pedidos Empresas EmpresaMoneda Cliente Producto Ruta --horas-sin-exito 6 --sin-repetir-horas 12` |
+| Manifiestos diaria | 06:30 (excepto domingo) y 14:30 | `python db/scheduler/run_manifiestos.py --env-file .env.prod` |
+| Manifiestos reconciliacion | domingo 05:00 | `python db/scheduler/run_manifiestos.py --env-file .env.prod --reconciliar` |
+| Manifiestos vigilante | 08:30, 16:30 | `python db/monitor_etl.py --env-file .env.prod --procesos Manifiestos Empresas EmpresaMoneda Cliente Producto Ruta --horas-sin-exito 6 --sin-repetir-horas 12` |
 
 Ventas se registra aparte con `.\db\scheduler\registrar_tareas_ventas.ps1` (acepta `-WhatIf`, `-Usuario/-Credencial`, `-Deshabilitada`, `-Desinstalar`, `-Horas`, `-DiaReconciliar`, `-HoraReconciliar`, `-HorasVigilante`, `-HorasSinExitoVigilante`). El dia de la reconciliacion se omiten las horas diarias que caen en las 6 h siguientes a ella. La diaria y la reconciliacion tienen limite de 2 h, igual que el vencimiento del bloqueo.
 
 El vigilante corre 2 h despues de cada corrida diaria. `SIN_EXITO` se mide desde el **inicio** del ultimo exito: lo normal a esa hora es <= 2 h (<= 5 h el domingo, por la reconciliacion de las 02:00), y si una corrida no se hizo, fallo o quedo bloqueada, pasa a 10-18 h; por eso el umbral es 6 h. **Si se cambian las horas de ventas, revisar las del vigilante y el umbral.** El monitor que corre al final de cada corrida usa 26 h.
 
-Guias se registra con `.\db\scheduler\registrar_tareas_guias.ps1`, con las mismas opciones y la misma logica de vigilante; sus horarios van 30 min despues de los de ventas para no cargar el AS400 con las dos corridas a la vez. Compras (`.\db\scheduler\registrar_tareas_compras.ps1`) va 30 min despues de guias y pedidos (`.\db\scheduler\registrar_tareas_pedidos.ps1`) 30 min despues de compras, con la misma logica.
+Guias se registra con `.\db\scheduler\registrar_tareas_guias.ps1`, con las mismas opciones y la misma logica de vigilante; sus horarios van 30 min despues de los de ventas para no cargar el AS400 con las dos corridas a la vez. Compras (`.\db\scheduler\registrar_tareas_compras.ps1`) va 30 min despues de guias y manifiestos (`.\db\scheduler\registrar_tareas_manifiestos.ps1`) 30 min despues de compras, con la misma logica.
 
 Las horas de Solar caen 30-60 min despues de cada lote que deposita el proceso externo (SMA/Soliscloud 02/13/20 UTC, Huawei 13 UTC, meteo 11 UTC). **Si el servidor no esta en UTC-6, ajustar las horas.**
 
@@ -134,4 +134,4 @@ Sin Python en el servidor no hay equivalente 100 % T-SQL: los scripts `load_silv
 
 - Si el servidor esta apagado, ni la corrida ni el vigilante avisan (viven en el mismo equipo). Mitigacion opcional: correr el monitor desde otro equipo.
 - La alerta `SIN_EXITO` mide corridas propias, no la frescura de `stg`; si el proceso externo deja de depositar datos, no se detecta.
-- Solar no cubre los flujos AS400 ni las cargas manuales (`dimPlanGeneracion`, geografia). De los hechos AS400 estan programados ventas, guias de remision, compras y pedidos (envios aun no).
+- Solar no cubre los flujos AS400 ni las cargas manuales (`dimPlanGeneracion`, geografia). De los hechos AS400 estan programados ventas, guias de remision, compras y manifiestos (envios aun no).

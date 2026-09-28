@@ -1,22 +1,22 @@
 """
-Silver: stg.factPedidos -> [int].factPedidos (tipado, fecha y hora
+Silver: stg.factManifiestos -> [int].factManifiestos (tipado, fecha y hora
 AAAAMMDD/HHMMSS a DATE/TIME).
 
 Todo ocurre dentro de JAREMAR -- el trabajo real lo hace
-[int].usp_MergeFactPedidos; este script solo orquesta el ciclo de control
+[int].usp_MergeFactManifiestos; este script solo orquesta el ciclo de control
 (registro de proceso, log de corrida, watermark).
 
 Como UNDIS002 no tiene llave unica, el SP no hace MERGE: REEMPLAZA en [int]
 el rango de fechas de la orden que trae stg (borra D02FEC >= MIN(stg) e
 inserta stg completo).
 
-Este es el UNICO paso que mueve el watermark "Pedidos" (el extract solo lo
+Este es el UNICO paso que mueve el watermark "Manifiestos" (el extract solo lo
 lee): MAX(D02FEC) de [int] SIN contar fechas futuras (el origen trae ordenes
 con fecha 2027-2031; si entraran al watermark, la ventana saltaria al futuro
 y el incremental dejaria de traer datos).
 
 Uso:
-    python db/etl/factPedidos/load_silver_fact_pedidos.py [--env-file .env]
+    python db/etl/factManifiestos/load_silver_fact_manifiestos.py [--env-file .env]
 """
 import argparse
 import datetime
@@ -26,7 +26,7 @@ from pathlib import Path
 import pyodbc
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-PROCESO = "Pedidos_Silver"
+PROCESO = "Manifiestos_Silver"
 
 
 def load_env(path: Path) -> dict:
@@ -66,7 +66,7 @@ def registrar_proceso(cur: pyodbc.Cursor) -> int:
             @ProcesoId = @pid OUTPUT;
         SELECT @pid;
         """,
-        PROCESO, "Pedidos", "stg", "stg", "factPedidos", "int", "factPedidos", "Incremental",
+        PROCESO, "Manifiestos", "stg", "stg", "factManifiestos", "int", "factManifiestos", "Incremental",
     )
     return cur.fetchone()[0]
 
@@ -142,8 +142,8 @@ def main() -> int:
     print(f"RunId: {run_id}")
 
     try:
-        verificar_extracts_completos(cur, ["Pedidos"])
-        cur.execute("EXEC [int].usp_MergeFactPedidos @RunId = ?", run_id)
+        verificar_extracts_completos(cur, ["Manifiestos"])
+        cur.execute("EXEC [int].usp_MergeFactManifiestos @RunId = ?", run_id)
         filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas, filas_eliminadas, desde = cur.fetchone()
         print(
             f"Reemplazo desde {desde}: Leidas: {filas_leidas} / Eliminadas: {filas_eliminadas} / "
@@ -156,15 +156,15 @@ def main() -> int:
             filas_actualizadas=filas_actualizadas, filas_ignoradas=filas_ignoradas,
         )
 
-        cur.execute("SELECT MAX(D02FEC) FROM [int].factPedidos WHERE D02FEC <= CAST(GETDATE() AS DATE)")
+        cur.execute("SELECT MAX(D02FEC) FROM [int].factManifiestos WHERE D02FEC <= CAST(GETDATE() AS DATE)")
         nuevo_max = cur.fetchone()[0]
         if nuevo_max is not None:
             nueva_fecha_hora = datetime.datetime.combine(nuevo_max, datetime.time())
             cur.execute(
                 "EXEC dbo.usp_Etl_WatermarkActualizar @Proceso = ?, @NuevaFechaHora = ?, @TipoCarga = ?",
-                "Pedidos", nueva_fecha_hora, "Incremental",
+                "Manifiestos", nueva_fecha_hora, "Incremental",
             )
-            print(f"Watermark 'Pedidos' actualizado a {nueva_fecha_hora}")
+            print(f"Watermark 'Manifiestos' actualizado a {nueva_fecha_hora}")
         conn.commit()
     except Exception as exc:
         conn.rollback()

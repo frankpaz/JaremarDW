@@ -1,9 +1,9 @@
 IF NOT EXISTS (
     SELECT 1 FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id
-    WHERE s.name = 'stg' AND t.name = 'factPedidos'
+    WHERE s.name = 'stg' AND t.name = 'factManifiestos'
 )
 BEGIN
-    CREATE TABLE stg.factPedidos (
+    CREATE TABLE stg.factManifiestos (
     [D02CIA] DECIMAL(2,0) NULL,
     [D02ORD] DECIMAL(8,0) NULL,
     [D02CLI] DECIMAL(8,0) NULL,
@@ -22,7 +22,7 @@ BEGIN
     [D02MAR] NVARCHAR(1) NULL,
     [D02FEC] DECIMAL(8,0) NULL,
     [D02HOR] DECIMAL(6,0) NULL,
-    [FechaCargaStg] DATETIME2(7) NOT NULL CONSTRAINT DF_factPedidos_FechaCargaStg DEFAULT (SYSDATETIME()),
+    [FechaCargaStg] DATETIME2(7) NOT NULL CONSTRAINT DF_factManifiestos_FechaCargaStg DEFAULT (SYSDATETIME()),
     [RunId] INT NULL
     );
 END

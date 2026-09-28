@@ -1,8 +1,8 @@
 """
-Extraccion Bronze: AS400/LX (PROLXUSRF.UNDIS002, detalle de pedidos de venta:
-lo que el cliente pidio, antes de facturar) -> stg.factPedidos en JAREMAR.
+Extraccion Bronze: AS400/LX (PROLXUSRF.UNDIS002, "Detalle de productos por
+orden"; manifiestos) -> stg.factManifiestos en JAREMAR.
 
-UNDIS002 es una tabla propia de Jaremar y la unica con la historia de pedidos:
+UNDIS002 es una tabla propia de Jaremar y la unica con esta historia por orden:
 las tablas estandar del ERP (ECH/ECL) se purgan y solo guardan desde 2026-03.
 Una fila por orden x linea; CIA+ORD+LIN es CASI unica (13.860 repetidas en
 14,9 M filas) y no hay fecha de modificacion (discovery 2026-09-28). Por eso,
@@ -10,8 +10,8 @@ igual que factGuiasRemision, la carga es por VENTANA de D02FEC (fecha de la
 orden): este extract trae todo D02FEC >= desde y silver/gold reemplazan ese
 rango (DELETE + INSERT) en vez de hacer MERGE.
 
-Ventana: MARGEN_DIAS hacia atras desde el watermark "Pedidos" (lo avanza SOLO
-load_silver_fact_pedidos.py; este script solo lo lee), nunca antes de
+Ventana: MARGEN_DIAS hacia atras desde el watermark "Manifiestos" (lo avanza SOLO
+load_silver_fact_manifiestos.py; este script solo lo lee), nunca antes de
 FECHA_INICIO (historico acordado con el usuario: desde 2026). --reconciliar
 extrae todo desde FECHA_INICIO. Hay ~560 filas con D02FEC futura (2027-2031):
 entran en todas las ventanas y silver las reemplaza igual que al resto.
@@ -19,7 +19,7 @@ entran en todas las ventanas y silver las reemplaza igual que al resto.
 No se cargan D02DSP (siempre 'BBL') ni D02LTE/D02LTR (vacios en toda la tabla).
 
 Uso:
-    python db/etl/factPedidos/extract_fact_pedidos.py [--env-file .env] [--reconciliar]
+    python db/etl/factManifiestos/extract_fact_manifiestos.py [--env-file .env] [--reconciliar]
 """
 import argparse
 import datetime
@@ -32,15 +32,15 @@ import pyodbc
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_CACHE_DIR = Path(__file__).resolve().parent / "schema_cache"
 
-PROCESO = "Pedidos"
-PROCESO_WATERMARK = "Pedidos"
+PROCESO = "Manifiestos"
+PROCESO_WATERMARK = "Manifiestos"
 MARGEN_DIAS = 30
 FECHA_INICIO = datetime.date(2026, 1, 1)
 AS400_ESQUEMA_ORIGEN = "PROLXUSRF"
 AS400_TABLA_ORIGEN = "UNDIS002"
 COLUMNA_FECHA = "D02FEC"
 STG_ESQUEMA = "stg"
-STG_TABLA = "factPedidos"
+STG_TABLA = "factManifiestos"
 
 # 18 de las 21 columnas del origen (discovery 2026-09-28, QSYS2.SYSCOLUMNS; el origen no
 # documenta ninguna: los nombres de negocio los dio el usuario para la capa gold).
@@ -99,7 +99,7 @@ def registrar_proceso(jrm_cur: pyodbc.Cursor) -> int:
             @ProcesoId = @pid OUTPUT;
         SELECT @pid;
         """,
-        PROCESO, "Pedidos", "AS400/LX",
+        PROCESO, "Manifiestos", "AS400/LX",
         AS400_ESQUEMA_ORIGEN, AS400_TABLA_ORIGEN,
         STG_ESQUEMA, STG_TABLA, "Incremental",
     )

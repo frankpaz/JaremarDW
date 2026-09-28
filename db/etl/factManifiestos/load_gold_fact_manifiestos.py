@@ -1,18 +1,18 @@
 """
-Gold: [int].factPedidos -> dw.factPedidos (nombres de negocio dados por el
+Gold: [int].factManifiestos -> dw.factManifiestos (nombres de negocio dados por el
 usuario, FKs a dimEmpresas, dimCliente, dimProducto y dimRuta).
 
 Todo ocurre dentro de JAREMAR -- el trabajo real lo hace
-dw.usp_MergeFactPedidos; este script solo orquesta el ciclo de control
+dw.usp_MergeFactManifiestos; este script solo orquesta el ciclo de control
 (registro de proceso, log de corrida, watermark).
 
 Igual que silver, REEMPLAZA un rango de fechas de la orden: desde la fecha
 mas antigua de las filas de [int] cargadas despues del watermark
-"Pedidos_Gold" (= MAX(FechaCargaInt) ya procesado) hasta el final.
+"Manifiestos_Gold" (= MAX(FechaCargaInt) ya procesado) hasta el final.
 --reconciliar reemplaza todo [int] (y re-resuelve las llaves de dimension).
 
 Uso:
-    python db/etl/factPedidos/load_gold_fact_pedidos.py [--env-file .env] [--reconciliar]
+    python db/etl/factManifiestos/load_gold_fact_manifiestos.py [--env-file .env] [--reconciliar]
 """
 import argparse
 import datetime
@@ -22,7 +22,7 @@ from pathlib import Path
 import pyodbc
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-PROCESO = "Pedidos_Gold"
+PROCESO = "Manifiestos_Gold"
 
 
 def load_env(path: Path) -> dict:
@@ -62,7 +62,7 @@ def registrar_proceso(cur: pyodbc.Cursor) -> int:
             @ProcesoId = @pid OUTPUT;
         SELECT @pid;
         """,
-        PROCESO, "Pedidos", "int", "int", "factPedidos", "dw", "factPedidos", "Incremental",
+        PROCESO, "Manifiestos", "int", "int", "factManifiestos", "dw", "factManifiestos", "Incremental",
     )
     return cur.fetchone()[0]
 
@@ -116,7 +116,7 @@ def main() -> int:
 
     try:
         cur.execute(
-            "EXEC dw.usp_MergeFactPedidos @RunId = ?, @UltimoWatermark = ?, @Reconciliar = ?",
+            "EXEC dw.usp_MergeFactManifiestos @RunId = ?, @UltimoWatermark = ?, @Reconciliar = ?",
             run_id, ultimo_watermark, 1 if args.reconciliar else 0,
         )
         (filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas,

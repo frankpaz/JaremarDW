@@ -1,15 +1,15 @@
 <#
 .SYNOPSIS
-  Registra en el Programador de tareas de Windows la ejecucion desatendida de los pedidos de venta.
+  Registra en el Programador de tareas de Windows la ejecucion desatendida de los manifiestos (PROLXUSRF.UNDIS002).
 
 .DESCRIPTION
   Crea tres tareas:
-    JaremarDW-Pedidos             corre db\scheduler\run_pedidos.py (dimEmpresas, dimCliente, dimProducto,
-                                  dimRuta + factPedidos de los ultimos 30 dias + monitor) a las horas de -Horas
+    JaremarDW-Manifiestos             corre db\scheduler\run_manifiestos.py (dimEmpresas, dimCliente, dimProducto,
+                                  dimRuta + factManifiestos de los ultimos 30 dias + monitor) a las horas de -Horas
                                   (default 06:30 y 14:30).
-    JaremarDW-Pedidos-Reconciliar corre run_pedidos.py --reconciliar (todo desde 2026) el -DiaReconciliar a la
+    JaremarDW-Manifiestos-Reconciliar corre run_manifiestos.py --reconciliar (todo desde 2026) el -DiaReconciliar a la
                                   -HoraReconciliar (default domingo 05:00).
-    JaremarDW-Pedidos-Vigilante   corre db\monitor_etl.py acotado a pedidos y sus dimensiones a las horas de
+    JaremarDW-Manifiestos-Vigilante   corre db\monitor_etl.py acotado a manifiestos y sus dimensiones a las horas de
                                   -HorasVigilante (default 08:30 y 16:30), para avisar si una corrida no se hizo,
                                   fallo o se colgo (alerta SIN_EXITO a -HorasSinExitoVigilante, default 6 h).
 
@@ -22,7 +22,7 @@
 
   El dia de la reconciliacion se omiten las horas diarias que caen dentro de las 6 h siguientes a ella
   (con los defaults, el domingo no corre la de 06:30; la de 14:30 si). Ambas tareas comparten el bloqueo
-  logs\run_pedidos.lock, asi que nunca se solapan.
+  logs\run_manifiestos.lock, asi que nunca se solapan.
 
   Requisitos en el equipo: Python 3 con pyodbc, ODBC Driver for SQL Server, acceso de red a la base y al
   AS400, el repo clonado y el archivo .env.prod (credenciales + ALERT_*). No lleva rutas ni usuarios fijos.
@@ -41,11 +41,11 @@
 .PARAMETER Desinstalar      Elimina las tres tareas y sale.
 
 .EXAMPLE
-  .\registrar_tareas_pedidos.ps1 -WhatIf
+  .\registrar_tareas_manifiestos.ps1 -WhatIf
 .EXAMPLE
-  .\registrar_tareas_pedidos.ps1 -Usuario "DOMINIO\svc_etl" -Credencial (Read-Host -AsSecureString)
+  .\registrar_tareas_manifiestos.ps1 -Usuario "DOMINIO\svc_etl" -Credencial (Read-Host -AsSecureString)
 .EXAMPLE
-  .\registrar_tareas_pedidos.ps1 -Desinstalar
+  .\registrar_tareas_manifiestos.ps1 -Desinstalar
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -64,10 +64,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$NombreDiaria = 'JaremarDW-Pedidos'
-$NombreReconciliar = 'JaremarDW-Pedidos-Reconciliar'
-$NombreVigilante = 'JaremarDW-Pedidos-Vigilante'
-$Prefijos = 'Pedidos Empresas EmpresaMoneda Cliente Producto Ruta'
+$NombreDiaria = 'JaremarDW-Manifiestos'
+$NombreReconciliar = 'JaremarDW-Manifiestos-Reconciliar'
+$NombreVigilante = 'JaremarDW-Manifiestos-Vigilante'
+$Prefijos = 'Manifiestos Empresas EmpresaMoneda Cliente Producto Ruta'
 $HorasOmitirTrasReconciliar = 6
 
 if ($Desinstalar) {
@@ -91,7 +91,7 @@ if (-not $Python) {
 }
 if (-not (Test-Path $Python)) { throw "No existe el ejecutable de Python: $Python" }
 
-$scriptRun = Join-Path $RutaRepo 'db\scheduler\run_pedidos.py'
+$scriptRun = Join-Path $RutaRepo 'db\scheduler\run_manifiestos.py'
 $scriptMon = Join-Path $RutaRepo 'db\monitor_etl.py'
 foreach ($f in $scriptRun, $scriptMon) { if (-not (Test-Path $f)) { throw "No existe: $f" } }
 
@@ -147,13 +147,13 @@ function Nueva-Tarea([string]$nombre, [string]$argumentos, $disparadores, [strin
     }
 }
 
-# Limite de 2 h: coincide con el vencimiento del bloqueo logs\run_pedidos.lock.
+# Limite de 2 h: coincide con el vencimiento del bloqueo logs\run_manifiestos.lock.
 Nueva-Tarea $NombreDiaria $argDiaria $dispDiaria ($detalleDiaria -join ', ') 120 `
-    'JaremarDW: dimensiones de pedidos + factPedidos (ultimos 30 dias) y monitor (db\scheduler\run_pedidos.py).'
+    'JaremarDW: dimensiones de manifiestos + factManifiestos (ultimos 30 dias) y monitor (db\scheduler\run_manifiestos.py).'
 Nueva-Tarea $NombreReconciliar $argReconciliar $dispReconciliar "$DiaReconciliar $HoraReconciliar" 120 `
-    'JaremarDW: reconciliacion semanal de pedidos, todo desde 2026 (db\scheduler\run_pedidos.py --reconciliar).'
+    'JaremarDW: reconciliacion semanal de manifiestos, todo desde 2026 (db\scheduler\run_manifiestos.py --reconciliar).'
 Nueva-Tarea $NombreVigilante $argVigilante $dispVigilante ($HorasVigilante -join ', ') 15 `
-    "JaremarDW: vigilante de pedidos; avisa si no hay corridas exitosas en $HorasSinExitoVigilante h."
+    "JaremarDW: vigilante de manifiestos; avisa si no hay corridas exitosas en $HorasSinExitoVigilante h."
 
 Write-Host "`nPython : $Python`nRepo   : $RutaRepo`nEntorno: $envRuta"
 Write-Host "Probar : Start-ScheduledTask -TaskName $NombreDiaria ; luego revisar $RutaRepo\logs"
