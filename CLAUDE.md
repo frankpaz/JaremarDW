@@ -66,7 +66,7 @@ Patrón estándar en cada script: `registrar_proceso()` -> `iniciar_run()` -> tr
 - Nombres de funciones/variables/comentarios en español; identificadores SQL en PascalCase.
 - DB2 for i (AS400) no soporta corchetes para identificadores — usar comillas dobles en las queries contra el origen.
 - Un pipeline nuevo por tabla vive en su propia carpeta `db/etl/<Tabla>/`, replicando los tres scripts (`extract_`, `load_silver_`, `load_gold_`) y las 4 migraciones correspondientes (int DDL, int SP, dw DDL, dw SP).
-- Las dimensiones se cargan FULL. Los hechos son incrementales (ver "Hechos incrementales" abajo), salvo `factEnvios`, cuyo extract es FULL porque el origen no tiene fecha de modificación confiable (211k filas).
+- Las dimensiones se cargan FULL. Los hechos son incrementales (ver "Hechos incrementales" abajo), salvo `factEnvios`, cuyo extract es FULL porque el origen no tiene fecha de modificación confiable (211k filas), y `factGuiasRemision`, que reemplaza una ventana de fechas porque el origen no tiene llave única.
 
 ### Monitoreo y dimensiones de referencia
 
@@ -84,9 +84,9 @@ Patrón estándar en cada script: `registrar_proceso()` -> `iniciar_run()` -> tr
 - **Vistas:** `dw.vwPlanDiarioInversor`, `dw.vwPlanDiarioPI` (una fila por planta y día; `PlanKwhDia` = plan de la planta, `PlanInversoresKwhDia` = suma de sus inversores) y `dw.vwPlanDiarioPlantel` (`Ubicacion`: 'Km 13.5' / 'Km 15'). La vista del reporte `dw.vwRptPlanPlantaDia` (fuera de las migraciones) suma `PlanDiarioInversor` y devuelve NULL, no 0, cuando una planta no tiene plan; la migración 159 la reescribe si existe.
 - **Problemas conocidos del archivo:** el original dividía el plan diario siempre entre 31 (corregido en el Excel con `DAY(EOMONTH(...))`); siguen sin capacidad EDIF ADMIN (3 inversores), MARGARINA (250 de 389 kWp) y SOLIS: su plan por inversor es 0 o parcial y así se guarda.
 
-### Hechos incrementales (ventas, compras, envíos)
+### Hechos incrementales (ventas, compras, envíos, guías de remisión)
 
-Flujo completo con `python db/etl/run_fact.py <ventas|compras|envios> [--env-file ...]` (corre extract -> silver -> gold en orden y se detiene al primer error).
+Flujo completo con `python db/etl/run_fact.py <ventas|compras|envios|guias> [--env-file ...]` (corre extract -> silver -> gold en orden y se detiene al primer error).
 
 **Ventas programada:** `python db/scheduler/run_ventas.py [--env-file .env.prod] [--reconciliar] [--solo empresas producto ventas] [--dry-run]` actualiza `dimEmpresas` y `dimProducto`, corre el flujo de ventas y el monitor. Se registra con `db/scheduler/registrar_tareas_ventas.ps1`: `JaremarDW-Ventas` a las 05:00 (excepto domingo) y 13:00, `JaremarDW-Ventas-Reconciliar` el domingo a las 02:00 y `JaremarDW-Ventas-Vigilante` a las 07:00 y 15:00 (alerta `SIN_EXITO` a 6 h, medido desde el inicio del último éxito; si se cambian las horas de ventas, revisar las del vigilante). Codigos de salida iguales a `run_solar.py`; bloqueo `logs/run_ventas.lock`.
 
@@ -94,6 +94,11 @@ Flujo completo con `python db/etl/run_fact.py <ventas|compras|envios> [--env-fil
 - **Silver:** `load_silver_fact_ventas/compras.py` verifica antes de mezclar que los dos extracts terminaron en `EXITO`/`ADVERTENCIA` y se corrieron después del último silver exitoso; si no, aborta sin tocar datos ni watermark.
 - **Gold:** incremental real, con watermark propio (`Ventas_Gold`, `Compras_Gold`, `Envios_Gold`) = `MAX(FechaCargaInt)` de lo ya procesado, no la hora del cliente. `dw.usp_MergeFact*` procesa solo `[int]` con `FechaCargaInt > watermark`.
 - **Reconciliación semanal:** `run_fact.py <flujo> --reconciliar` extrae todo el histórico (ignora el watermark) y hace que gold recorra todo `[int]`. Captura ediciones/altas tardías fuera de la ventana de 30 días y rellena llaves de dimensión (`EmpresaKey`, `ProductoKey`, `ProveedorKey`) que quedaron NULL por llegada tardía. **No propaga borrados del origen** (silver no da de baja lo que desaparece del AS400; solo `factEnvios` lo hace, por ser FULL).
+
+**Guías de remisión (`factGuiasRemision`, desde `PROLXUSRF.UNDIS100`):** `python db/etl/run_fact.py guias` o, programado, `python db/scheduler/run_guias.py [--reconciliar] [--solo ...]`, que antes actualiza `dimEmpresas`, `dimCliente`, `dimProducto`, `dimVehiculo` y `dimMotivoTraslado` (esta última desde `UNDIS901`). Tareas: `db/scheduler/registrar_tareas_guias.ps1` (05:30 excepto domingo y 13:30, reconciliación domingo 03:00, vigilante 07:30/15:30). `run_ventas.py` y `run_guias.py` comparten la lógica de `db/scheduler/hecho_programado.py`.
+- **Sin llave única:** una fila por guía × factura × producto, sin PK ni número de línea (guía+factura+producto se repite ~5 %, hay duplicados exactos). Por eso silver y gold **no hacen MERGE: reemplazan el rango** `D100F1` (fecha de registro) `>= MIN(stg)` con DELETE + INSERT (TRUNCATE si el rango cubre todo). `GuiaRemisionKey` es solo sustituta y cambia en cada reemplazo; no usarla como referencia estable.
+- **Ventana:** el extract trae `D100F1 >= watermark "GuiasRemision" - 30 días`, nunca antes del **2025-01-01** (histórico acordado); `--reconciliar` trae todo desde esa fecha. Solo silver avanza el watermark (con `MAX(D100F1)` de `[int]`) y aborta si `stg` viene vacío o el extract no terminó bien. Gold reemplaza desde la fecha más antigua de lo que silver cargó después de su watermark `GuiasRemision_Gold`.
+- **Datos:** `Estado` = `VALIDO`/`ANULAD` (los reportes deben filtrar anuladas); `FechaEnvio` trae fechas inválidas o futuras en el origen (las inválidas quedan NULL). `ProductoKey` queda NULL en ~8 % (texto libre en guías de báscula).
 
 ### Programación del dominio Solar
 

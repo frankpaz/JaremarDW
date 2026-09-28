@@ -8,6 +8,7 @@ Uso:
     python db/etl/run_fact.py ventas   [--env-file .env.prod]     # diario (incremental, ventana de 30 dias)
     python db/etl/run_fact.py compras  [--env-file .env.prod]
     python db/etl/run_fact.py envios   [--env-file .env.prod]     # el extract es FULL (el origen no tiene fecha de modificacion)
+    python db/etl/run_fact.py guias    [--env-file .env.prod]     # guias de remision: ventana de 30 dias por fecha de registro
 
     python db/etl/run_fact.py ventas --reconciliar                # semanal: extrae todo el historico, gold recorre todo [int]
 """
@@ -36,6 +37,12 @@ FLUJOS = {
         ("factEnvios/extract_fact_envios.py", False),
         ("factEnvios/load_silver_fact_envios.py", False),
         ("factEnvios/load_gold_fact_envios.py", True),
+    ],
+    # Reemplazo por ventana de fecha de registro (el origen no tiene llave unica); --reconciliar = desde 2025.
+    "guias": [
+        ("factGuiasRemision/extract_fact_guias_remision.py", True),
+        ("factGuiasRemision/load_silver_fact_guias_remision.py", False),
+        ("factGuiasRemision/load_gold_fact_guias_remision.py", True),
     ],
 }
 

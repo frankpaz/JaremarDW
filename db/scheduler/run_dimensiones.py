@@ -59,12 +59,14 @@ GRUPOS = {
                          "../dimGeografia/load_dim_geografia.py"]),
     # Resuelve ProveedorKey/PaisKey en gold: va despues de proveedor y pais.
     "vehiculo": ("dimVehiculo", ["extract_dim_vehiculo.py", "load_silver_dim_vehiculo.py", "load_gold_dim_vehiculo.py"]),
+    "motivotraslado": ("dimMotivoTraslado", ["extract_dim_motivo_traslado.py", "load_silver_dim_motivo_traslado.py",
+                                             "load_gold_dim_motivo_traslado.py"]),
 }
 
 # Prefijos de sus procesos en dbo.EtlProcess (para acotar el monitor).
 PREFIJOS_MONITOR = ["Sector", "CentroCosto", "Cuenta", "SubCuenta", "Empresas", "EmpresaMoneda", "ClasesProducto",
                     "Producto", "Cliente", "Proveedor", "TerminosVenta", "TerminosCompra", "Ruta", "Viaje", "Pais",
-                    "DimDepartamento", "DimMunicipio", "Vehiculo"]
+                    "DimDepartamento", "DimMunicipio", "Vehiculo", "MotivoTraslado"]
 
 
 def pasos_del_grupo(grupo: str) -> list:
