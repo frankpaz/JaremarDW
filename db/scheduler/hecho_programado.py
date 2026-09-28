@@ -1,6 +1,6 @@
 """
 Logica comun de los orquestadores de hechos AS400 programados (run_ventas.py,
-run_guias.py): actualiza primero las dimensiones de las que depende el gold del
+run_guias.py, run_compras.py): actualiza primero las dimensiones de las que depende el gold del
 hecho, corre el flujo del hecho (tomado de db/etl/run_fact.py) y al final el
 monitor acotado a esos procesos.
 
