@@ -67,6 +67,7 @@ Patrón estándar en cada script: `registrar_proceso()` -> `iniciar_run()` -> tr
 - DB2 for i (AS400) no soporta corchetes para identificadores — usar comillas dobles en las queries contra el origen.
 - Un pipeline nuevo por tabla vive en su propia carpeta `db/etl/<Tabla>/`, replicando los tres scripts (`extract_`, `load_silver_`, `load_gold_`) y las 4 migraciones correspondientes (int DDL, int SP, dw DDL, dw SP).
 - Las dimensiones se cargan FULL. Los hechos son incrementales (ver "Hechos incrementales" abajo), salvo `factEnvios`, cuyo extract es FULL porque el origen no tiene fecha de modificación confiable (211k filas), y `factGuiasRemision`, que reemplaza una ventana de fechas porque el origen no tiene llave única.
+- `dimCliente` trae **activos y dados de baja** de `PROLX835F.RCM` (`CMID` `CM` y `CZ`, ~137 k; migración 179), porque los documentos siguen usando clientes que después se dan de baja. `dw.dimCliente.EsActivo` = 1 para `CM`, 0 para `CZ`: **para listar solo clientes activos filtrar `EsActivo = 1`**. `EsVigente` sigue indicando si el cliente existe en `RCM`.
 
 ### Monitoreo y dimensiones de referencia
 
@@ -98,7 +99,7 @@ Flujo completo con `python db/etl/run_fact.py <ventas|compras|envios|guias> [--e
 **Guías de remisión (`factGuiasRemision`, desde `PROLXUSRF.UNDIS100`):** `python db/etl/run_fact.py guias` o, programado, `python db/scheduler/run_guias.py [--reconciliar] [--solo ...]`, que antes actualiza `dimEmpresas`, `dimCliente`, `dimProducto`, `dimVehiculo` y `dimMotivoTraslado` (esta última desde `UNDIS901`). Tareas: `db/scheduler/registrar_tareas_guias.ps1` (05:30 excepto domingo y 13:30, reconciliación domingo 03:00, vigilante 07:30/15:30). `run_ventas.py` y `run_guias.py` comparten la lógica de `db/scheduler/hecho_programado.py`.
 - **Sin llave única:** una fila por guía × factura × producto, sin PK ni número de línea (guía+factura+producto se repite ~5 %, hay duplicados exactos). Por eso silver y gold **no hacen MERGE: reemplazan el rango** `D100F1` (fecha de registro) `>= MIN(stg)` con DELETE + INSERT (TRUNCATE si el rango cubre todo). `GuiaRemisionKey` es solo sustituta y cambia en cada reemplazo; no usarla como referencia estable.
 - **Ventana:** el extract trae `D100F1 >= watermark "GuiasRemision" - 30 días`, nunca antes del **2025-01-01** (histórico acordado); `--reconciliar` trae todo desde esa fecha. Solo silver avanza el watermark (con `MAX(D100F1)` de `[int]`) y aborta si `stg` viene vacío o el extract no terminó bien. Gold reemplaza desde la fecha más antigua de lo que silver cargó después de su watermark `GuiasRemision_Gold`.
-- **Datos:** `Estado` = `VALIDO`/`ANULAD` (los reportes deben filtrar anuladas); `FechaEnvio` trae fechas inválidas o futuras en el origen (las inválidas quedan NULL). `ProductoKey` queda NULL en ~8 % (texto libre en guías de báscula).
+- **Datos:** `Estado` = `VALIDO`/`ANULAD` (los reportes deben filtrar anuladas); `FechaEnvio` trae fechas inválidas o futuras en el origen (las inválidas quedan NULL). `ProductoKey` queda NULL en ~0,5 % de las filas (texto libre en guías de báscula) y `ClienteKey` en ~0,6 % (clientes internos `6`/`600`, traslados entre establecimientos, que no existen en `RCM`).
 
 ### Programación del dominio Solar
 

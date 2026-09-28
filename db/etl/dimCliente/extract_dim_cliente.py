@@ -1,13 +1,15 @@
 """
-Extraccion Bronze: AS400/LX (PROLX835F.RCM, CMID='CM') -> stg.dimCliente en
-JAREMAR.
+Extraccion Bronze: AS400/LX (PROLX835F.RCM, CMID IN ('CM','CZ')) -> stg.dimCliente
+en JAREMAR.
 
 RCM es el maestro de clientes del ERP (Infor Distribution SX.e), con 358
 columnas y dos poblaciones disjuntas bajo el mismo archivo fisico (CMID='CM'
 vs 'CZ', 0 CCUST en comun entre ambas -- confirmado con
-db/discovery/discover_columnas.py). Se uso CMID='CM' porque el 98.3% de los
-clientes que aparecen en factVentas (SIL.ILCUST) coinciden con esa
-poblacion, contra apenas 1.7% con 'CZ'.
+db/discovery/discover_columnas.py). Hasta el 2026-09-28 solo se cargaba 'CM';
+desde entonces se cargan las dos, con CMID como columna: 'CZ' son clientes
+dados de baja (103 k al 2026-09-28) que siguen apareciendo en documentos
+emitidos cuando estaban activos (2.374 clientes en factGuiasRemision, 534 en
+factVentas). En dw.dimCliente se expone como EsActivo (CM = 1, CZ = 0).
 
 Columnas elegidas tras analisis de poblacion real sobre 33740 filas
 (2026-09-22, ver db/discovery/discover_columnas.py --poblacion): se
@@ -16,8 +18,8 @@ y ~30 columnas de ventas/costo mensual historico (CSL01-12, CCS01-12, CYSAL,
 CYCOS, etc.) que la ERP mantiene como resumen propio -- redundantes, se
 pueden derivar agregando dw.factVentas en vez de duplicarlas aqui.
 
-Carga FULL (truncate + insert). CCUST es unico dentro de CMID='CM'
-(33740 filas = 33740 CCUST distintos, verificado).
+Carga FULL (truncate + insert). CCUST es unico en CM + CZ juntos (0 codigos
+repetidos entre ambas poblaciones, verificado 2026-09-28).
 
 Uso:
     python db/etl/dimCliente/extract_dim_cliente.py [--env-file .env]
@@ -37,12 +39,14 @@ PROCESO = "Cliente"
 AS400_ESQUEMA_ORIGEN = "PROLX835F"
 AS400_TABLA_ORIGEN = "RCM"
 FILTRO_COLUMNA = "CMID"
-FILTRO_VALOR = "CM"
+# CM = cliente activo, CZ = dado de baja (decision del usuario 2026-09-28): se cargan
+# ambos para que los hechos no pierdan el cliente cuando se da de baja.
+FILTRO_VALORES = ("CM", "CZ")
 STG_ESQUEMA = "stg"
 STG_TABLA = "dimCliente"
 
 COLUMNAS_DESEADAS = [
-    "CCUST", "CNME", "CMALPH",
+    "CMID", "CCUST", "CNME", "CMALPH",
     "CAD1", "CAD2", "CAD3", "CSTE", "CZIP", "CCOUN",
     "CTYPE", "CCOMP", "CCCUS", "CREG", "CMPREG", "CDEA1",
     "CSAL", "CTERM", "CTAX", "CTXID", "CPCD", "CCURR", "CWHSE", "CROUT", "CMDFOT", "CCON", "CPHON",
@@ -228,8 +232,8 @@ def extraer_filas(as400_cur: pyodbc.Cursor, columnas: list) -> list:
     nombres = ", ".join(f'"{c["nombre"]}"' for c in columnas)
     as400_cur.execute(
         f'SELECT {nombres} FROM {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN} '
-        f'WHERE "{FILTRO_COLUMNA}" = ?',
-        FILTRO_VALOR,
+        f'WHERE "{FILTRO_COLUMNA}" IN ({", ".join("?" for _ in FILTRO_VALORES)})',
+        *FILTRO_VALORES,
     )
     return as400_cur.fetchall()
 
