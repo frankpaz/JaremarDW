@@ -33,7 +33,7 @@ python db/etl/dimSector/load_gold_dim_sector.py       # Gold: [int] -> dw
 ```
 Todos aceptan `--env-file <ruta>`.
 
-Actualizar todas las dimensiones AS400 de una vez (extract -> silver -> gold de cada una, geografía después de `dimPais`, y monitor al final): `python db/scheduler/run_dimensiones.py [--env-file .env.prod] [--solo viaje ruta ...] [--dry-run]`. **Al crear una dimensión nueva, agregarla a `GRUPOS` y a `PREFIJOS_MONITOR` en ese script.**
+Actualizar todas las dimensiones AS400 de una vez (extract -> silver -> gold de cada una, geografía después de `dimPais`, y monitor al final): `python db/scheduler/run_dimensiones.py [--env-file .env.prod] [--solo viaje ruta ...] [--dry-run]`. Se programa con `db/scheduler/registrar_tareas_dimensiones.ps1` (diaria 21:30, ~5 min; vigilante 23:00). **Al crear una dimensión nueva, agregarla a `GRUPOS` y a `PREFIJOS_MONITOR` en ese script.**
 
 ## Documentos de estado
 
@@ -99,6 +99,9 @@ Flujo completo con `python db/etl/run_fact.py <ventas|compras|envios|guias|manif
 **Ventas programada:** `python db/scheduler/run_ventas.py [--env-file .env.prod] [--reconciliar] [--solo empresas producto ventas] [--dry-run]` actualiza `dimEmpresas` y `dimProducto`, corre el flujo de ventas y el monitor. Se registra con `db/scheduler/registrar_tareas_ventas.ps1`: `JaremarDW-Ventas` a las 05:00 (excepto domingo) y 13:00, `JaremarDW-Ventas-Reconciliar` el domingo a las 02:00 y `JaremarDW-Ventas-Vigilante` a las 07:00 y 15:00 (alerta `SIN_EXITO` a 6 h, medido desde el inicio del último éxito; si se cambian las horas de ventas, revisar las del vigilante). Codigos de salida iguales a `run_solar.py`; bloqueo `logs/run_ventas.lock`.
 
 **Compras programada:** `python db/scheduler/run_compras.py [--reconciliar] [--solo empresas proveedor compras]` actualiza `dimEmpresas` y `dimProveedor` y corre el flujo de compras. Tareas: `db/scheduler/registrar_tareas_compras.ps1` (06:00 excepto domingo y 14:00, reconciliación domingo 04:00, vigilante 08:00/16:00). Bloqueo `logs/run_compras.lock`.
+
+**Envíos programada:** `python db/scheduler/run_envios.py [--solo vehiculo envios]` actualiza `dimVehiculo` y corre el flujo de envíos. Tareas: `db/scheduler/registrar_tareas_envios.ps1` (07:00 y 15:00, vigilante 09:00/17:00). **Sin reconciliación programada:** el extract ya es FULL y gold rellena en cada corrida las `VehiculoKey` que la dimensión resuelva después. Bloqueo `logs/run_envios.lock`.
+- **`VehiculoKey`** (migración 186): `NumeroCamion` = `dw.dimVehiculo.CodigoVehiculo` (99,98 % de los envíos con camión; ~43 % de los envíos no trae camión y queda NULL). En cada corrida `dw.usp_MergeFactEnvios` toma, además de lo nuevo, los envíos cuya llave en gold difiere de la que hoy resuelve la dimensión; el watermark avanza solo con lo nuevo. `RutaKey` en envíos sigue abierto.
 
 - **Extract (Bronze):** ventana de `MARGEN_DIAS = 30` hacia atrás desde el watermark compartido `Ventas`/`Compras`. Encabezados y líneas usan **el mismo** watermark a propósito: silver cruza líneas con encabezados, y con ventanas distintas las líneas quedarían con columnas de encabezado en NULL. Solo silver avanza ese watermark (con el `MAX` real de fecha en `[int]`); los extracts solo lo leen.
 - **Silver:** `load_silver_fact_ventas/compras.py` verifica antes de mezclar que los dos extracts terminaron en `EXITO`/`ADVERTENCIA` y se corrieron después del último silver exitoso; si no, aborta sin tocar datos ni watermark.
