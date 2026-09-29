@@ -11,6 +11,7 @@ Uso:
     python db/etl/run_fact.py guias    [--env-file .env.prod]     # guias de remision: ventana de 30 dias por fecha de registro
     python db/etl/run_fact.py manifiestos [--env-file .env.prod]  # manifiestos (UNDIS002): ventana de 30 dias por fecha de la orden
     python db/etl/run_fact.py bascula  [--env-file .env.prod]     # boletas de bascula (BASMASTNN): ventana de 30 dias + abiertas, MERGE
+    python db/etl/run_fact.py sanalejo_fruta [--env-file .env.prod]  # dominio SanAlejo (tambien sanalejo_despachos / sanalejo_ingresos)
 
     python db/etl/run_fact.py ventas --reconciliar                # semanal: extrae todo el historico, gold recorre todo [int]
 """
@@ -57,6 +58,23 @@ FLUJOS = {
         ("factBasculaBufalo/extract_fact_bascula_bufalo.py", True),
         ("factBasculaBufalo/load_silver_fact_bascula_bufalo.py", False),
         ("factBasculaBufalo/load_gold_fact_bascula_bufalo.py", True),
+    ],
+    # Dominio SanAlejo (PIDSA, bascula de las extractoras): MERGE por CODCIA + NUMDOC, nunca borra;
+    # ventana de 30 dias por fecha de documento o de modificacion; --reconciliar = todo desde 2025.
+    "sanalejo_fruta": [
+        ("factSanAlejoFruta/extract_fact_san_alejo_fruta.py", True),
+        ("factSanAlejoFruta/load_silver_fact_san_alejo_fruta.py", False),
+        ("factSanAlejoFruta/load_gold_fact_san_alejo_fruta.py", True),
+    ],
+    "sanalejo_despachos": [
+        ("factSanAlejoDespachos/extract_fact_san_alejo_despachos.py", True),
+        ("factSanAlejoDespachos/load_silver_fact_san_alejo_despachos.py", False),
+        ("factSanAlejoDespachos/load_gold_fact_san_alejo_despachos.py", True),
+    ],
+    "sanalejo_ingresos": [
+        ("factSanAlejoIngresos/extract_fact_san_alejo_ingresos.py", True),
+        ("factSanAlejoIngresos/load_silver_fact_san_alejo_ingresos.py", False),
+        ("factSanAlejoIngresos/load_gold_fact_san_alejo_ingresos.py", True),
     ],
 }
 

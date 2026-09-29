@@ -69,13 +69,31 @@ GRUPOS = {
                                          "load_gold_dim_lugar_bascula.py"]),
     "productobascula": ("dimProductoBascula", ["extract_dim_producto_bascula.py", "load_silver_dim_producto_bascula.py",
                                                "load_gold_dim_producto_bascula.py"]),
+    # Dominio SanAlejo (catalogos de PIDSA; los usan los hechos factSanAlejo*).
+    "sanalejoproducto": ("dimSanAlejoProducto", ["extract_dim_san_alejo_producto.py", "load_silver_dim_san_alejo_producto.py",
+                                                 "load_gold_dim_san_alejo_producto.py"]),
+    "sanalejolocalizacion": ("dimSanAlejoLocalizacion", ["extract_dim_san_alejo_localizacion.py",
+                                                         "load_silver_dim_san_alejo_localizacion.py",
+                                                         "load_gold_dim_san_alejo_localizacion.py"]),
+    "sanalejotransportista": ("dimSanAlejoTransportista", ["extract_dim_san_alejo_transportista.py",
+                                                           "load_silver_dim_san_alejo_transportista.py",
+                                                           "load_gold_dim_san_alejo_transportista.py"]),
+    "sanalejocliente": ("dimSanAlejoCliente", ["extract_dim_san_alejo_cliente.py", "load_silver_dim_san_alejo_cliente.py",
+                                               "load_gold_dim_san_alejo_cliente.py"]),
+    "sanalejoproductor": ("dimSanAlejoProductor", ["extract_dim_san_alejo_productor.py",
+                                                   "load_silver_dim_san_alejo_productor.py",
+                                                   "load_gold_dim_san_alejo_productor.py"]),
+    "sanalejofinca": ("dimSanAlejoFinca", ["extract_dim_san_alejo_finca.py", "load_silver_dim_san_alejo_finca.py",
+                                           "load_gold_dim_san_alejo_finca.py"]),
 }
 
 # Prefijos de sus procesos en dbo.EtlProcess (para acotar el monitor).
 PREFIJOS_MONITOR = ["Sector", "CentroCosto", "Cuenta", "SubCuenta", "Empresas", "EmpresaMoneda", "ClasesProducto",
                     "Producto", "Cliente", "Proveedor", "TerminosVenta", "TerminosCompra", "Ruta", "Viaje", "Pais",
                     "DimDepartamento", "DimMunicipio", "Vehiculo", "MotivoTraslado",
-                    "Basculas", "TipoBoleta", "LugarBascula", "ProductoBascula"]
+                    "Basculas", "TipoBoleta", "LugarBascula", "ProductoBascula",
+                    "SanAlejoProducto", "SanAlejoLocalizacion", "SanAlejoTransportista", "SanAlejoCliente",
+                    "SanAlejoProductor", "SanAlejoFinca"]
 
 
 def pasos_del_grupo(grupo: str) -> list:

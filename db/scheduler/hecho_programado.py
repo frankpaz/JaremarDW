@@ -1,12 +1,14 @@
 """
 Logica comun de los orquestadores de hechos AS400 programados (run_ventas.py,
-run_guias.py, run_compras.py, run_manifiestos.py, run_envios.py, run_bascula.py): actualiza
-primero las dimensiones de las que depende el gold del hecho, corre el flujo del
-hecho (tomado de db/etl/run_fact.py) y al final el monitor acotado a esos procesos.
+run_guias.py, run_compras.py, run_manifiestos.py, run_envios.py, run_bascula.py,
+run_sanalejo.py): actualiza primero las dimensiones de las que depende el gold del
+hecho, corre el flujo del hecho (tomado de db/etl/run_fact.py) y al final el monitor
+acotado a esos procesos. Un orquestador puede correr varios hechos (run_sanalejo.py).
 
-Cada dimension es un grupo independiente: si una falla, el hecho corre igual
-(las llaves que queden NULL se rellenan en la reconciliacion). Dentro del hecho,
-ante el primer error se omiten los pasos siguientes.
+Cada dimension y cada hecho es un grupo independiente: si una dimension falla, el
+hecho corre igual (las llaves que queden NULL se rellenan en la corrida siguiente o
+en la reconciliacion), y si un hecho falla los demas siguen. Dentro de un grupo, ante
+el primer error se omiten los pasos siguientes.
 
 Codigos de salida:
     0  todo correcto        1  algun paso fallo      2  ya hay otra corrida en curso
@@ -35,13 +37,13 @@ HORAS_SIN_EXITO = 26
 SIN_REPETIR_HORAS = 12
 
 
-def armar_pasos(flujo: str, dimensiones: list, reconciliar: bool):
+def armar_pasos(dimensiones: list, reconciliar: bool):
     def pasos_del_grupo(grupo: str) -> list:
         """[(etiqueta, ruta_script, argumentos extra)] en orden."""
         if grupo in dimensiones:
             return run_dimensiones.pasos_del_grupo(grupo)
         salida = []
-        for script, acepta_reconciliar in FLUJOS[flujo]:
+        for script, acepta_reconciliar in FLUJOS[grupo]:
             ruta = ETL / script
             extra = ["--reconciliar"] if reconciliar and acepta_reconciliar else []
             salida.append((f"{ruta.parent.name}/{ruta.stem}", ruta, extra))
@@ -74,12 +76,14 @@ def correr_monitor(env_file: str, log: Registro, prefijos: list, titulo: str) ->
 
 def main(nombre: str, flujo: str, dimensiones: list, prefijos_monitor: list,
          timeout_defecto: int, timeout_reconciliar: int, descripcion: str) -> int:
-    """nombre: sufijo de log/bloqueo; flujo: clave de run_fact.FLUJOS; dimensiones: grupos de run_dimensiones."""
-    grupos_todos = dimensiones + [flujo]
+    """nombre: sufijo de log/bloqueo; flujo: clave (o lista de claves) de run_fact.FLUJOS; dimensiones: grupos de
+    run_dimensiones."""
+    flujos = [flujo] if isinstance(flujo, str) else list(flujo)
+    grupos_todos = dimensiones + flujos
     parser = argparse.ArgumentParser(description=descripcion)
     parser.add_argument("--env-file", default=None, help="Archivo .env con las credenciales (default: .env de la raiz).")
     parser.add_argument("--reconciliar", action="store_true",
-                        help=f"Reconciliacion semanal del hecho '{flujo}' (ver db/etl/run_fact.py).")
+                        help=f"Reconciliacion semanal de {', '.join(flujos)} (ver db/etl/run_fact.py).")
     parser.add_argument("--solo", nargs="+", choices=grupos_todos, default=None, metavar="GRUPO",
                         help=f"Corre solo estos grupos ({', '.join(grupos_todos)}).")
     parser.add_argument("--dry-run", action="store_true", help="Muestra el plan y verifica los scripts; no ejecuta nada.")
@@ -90,7 +94,7 @@ def main(nombre: str, flujo: str, dimensiones: list, prefijos_monitor: list,
     args = parser.parse_args()
 
     grupos = [g for g in grupos_todos if g in args.solo] if args.solo else grupos_todos
-    pasos_del_grupo = armar_pasos(flujo, dimensiones, args.reconciliar)
+    pasos_del_grupo = armar_pasos(dimensiones, args.reconciliar)
     timeout = args.timeout_paso or (timeout_reconciliar if args.reconciliar else timeout_defecto)
     modo = "reconciliacion" if args.reconciliar else "incremental"
 
