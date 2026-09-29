@@ -61,12 +61,21 @@ GRUPOS = {
     "vehiculo": ("dimVehiculo", ["extract_dim_vehiculo.py", "load_silver_dim_vehiculo.py", "load_gold_dim_vehiculo.py"]),
     "motivotraslado": ("dimMotivoTraslado", ["extract_dim_motivo_traslado.py", "load_silver_dim_motivo_traslado.py",
                                              "load_gold_dim_motivo_traslado.py"]),
+    # Catalogos propios de la bascula (los usa dw.factBasculaBufalo).
+    "basculas": ("dimBascula", ["extract_dim_bascula.py", "load_silver_dim_bascula.py", "load_gold_dim_bascula.py"]),
+    "tipoboleta": ("dimTipoBoleta", ["extract_dim_tipo_boleta.py", "load_silver_dim_tipo_boleta.py",
+                                     "load_gold_dim_tipo_boleta.py"]),
+    "lugarbascula": ("dimLugarBascula", ["extract_dim_lugar_bascula.py", "load_silver_dim_lugar_bascula.py",
+                                         "load_gold_dim_lugar_bascula.py"]),
+    "productobascula": ("dimProductoBascula", ["extract_dim_producto_bascula.py", "load_silver_dim_producto_bascula.py",
+                                               "load_gold_dim_producto_bascula.py"]),
 }
 
 # Prefijos de sus procesos en dbo.EtlProcess (para acotar el monitor).
 PREFIJOS_MONITOR = ["Sector", "CentroCosto", "Cuenta", "SubCuenta", "Empresas", "EmpresaMoneda", "ClasesProducto",
                     "Producto", "Cliente", "Proveedor", "TerminosVenta", "TerminosCompra", "Ruta", "Viaje", "Pais",
-                    "DimDepartamento", "DimMunicipio", "Vehiculo", "MotivoTraslado"]
+                    "DimDepartamento", "DimMunicipio", "Vehiculo", "MotivoTraslado",
+                    "Basculas", "TipoBoleta", "LugarBascula", "ProductoBascula"]
 
 
 def pasos_del_grupo(grupo: str) -> list:

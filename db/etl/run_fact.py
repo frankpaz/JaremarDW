@@ -10,6 +10,7 @@ Uso:
     python db/etl/run_fact.py envios   [--env-file .env.prod]     # el extract es FULL (el origen no tiene fecha de modificacion)
     python db/etl/run_fact.py guias    [--env-file .env.prod]     # guias de remision: ventana de 30 dias por fecha de registro
     python db/etl/run_fact.py manifiestos [--env-file .env.prod]  # manifiestos (UNDIS002): ventana de 30 dias por fecha de la orden
+    python db/etl/run_fact.py bascula  [--env-file .env.prod]     # boletas de bascula (BASMASTNN): ventana de 30 dias + abiertas, MERGE
 
     python db/etl/run_fact.py ventas --reconciliar                # semanal: extrae todo el historico, gold recorre todo [int]
 """
@@ -50,6 +51,12 @@ FLUJOS = {
         ("factManifiestos/extract_fact_manifiestos.py", True),
         ("factManifiestos/load_silver_fact_manifiestos.py", False),
         ("factManifiestos/load_gold_fact_manifiestos.py", True),
+    ],
+    # Boletas de bascula: MERGE por llave construida (nunca borra); --reconciliar = toda la tabla.
+    "bascula": [
+        ("factBasculaBufalo/extract_fact_bascula_bufalo.py", True),
+        ("factBasculaBufalo/load_silver_fact_bascula_bufalo.py", False),
+        ("factBasculaBufalo/load_gold_fact_bascula_bufalo.py", True),
     ],
 }
 
