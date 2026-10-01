@@ -61,9 +61,13 @@ def purgar_logs(log_dir: Path, nombre: str, dias: int) -> int:
     return n
 
 
-def correr_monitor(env_file: str, log: Registro, prefijos: list, titulo: str) -> int:
-    cmd = [sys.executable, str(MONITOR), "--procesos", *prefijos, "--horas-sin-exito", str(HORAS_SIN_EXITO),
+def correr_monitor(env_file: str, log: Registro, prefijos: list, titulo: str, dominios: list = None) -> int:
+    cmd = [sys.executable, str(MONITOR), "--horas-sin-exito", str(HORAS_SIN_EXITO),
            "--sin-repetir-horas", str(SIN_REPETIR_HORAS)]
+    if prefijos:
+        cmd += ["--procesos", *prefijos]
+    if dominios:
+        cmd += ["--dominios", *dominios]
     if env_file:
         cmd += ["--env-file", env_file]
     log(f"\n##### Monitor de alertas ({titulo}) #####")
@@ -75,9 +79,10 @@ def correr_monitor(env_file: str, log: Registro, prefijos: list, titulo: str) ->
 
 
 def main(nombre: str, flujo: str, dimensiones: list, prefijos_monitor: list,
-         timeout_defecto: int, timeout_reconciliar: int, descripcion: str) -> int:
+         timeout_defecto: int, timeout_reconciliar: int, descripcion: str, dominios_monitor: list = None) -> int:
     """nombre: sufijo de log/bloqueo; flujo: clave (o lista de claves) de run_fact.FLUJOS; dimensiones: grupos de
-    run_dimensiones."""
+    run_dimensiones; prefijos_monitor / dominios_monitor: acotan el monitor por prefijo del proceso o por
+    dbo.EtlProcess.Dominio."""
     flujos = [flujo] if isinstance(flujo, str) else list(flujo)
     grupos_todos = dimensiones + flujos
     parser = argparse.ArgumentParser(description=descripcion)
@@ -131,7 +136,7 @@ def main(nombre: str, flujo: str, dimensiones: list, prefijos_monitor: list,
         hubo_fallo = any(r["estado"] == "FALLO" for r in resultados)
 
         rc_monitor = None if args.sin_monitor else correr_monitor(
-            args.env_file, log, prefijos_monitor, f"{nombre} y sus dimensiones")
+            args.env_file, log, prefijos_monitor, f"{nombre} y sus dimensiones", dominios_monitor)
 
         log(f"\nCorrida terminada {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ({(datetime.datetime.now() - inicio).total_seconds():.0f}s)")
         if hubo_fallo:

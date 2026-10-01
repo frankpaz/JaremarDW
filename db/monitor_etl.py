@@ -13,6 +13,9 @@ Uso:
     # Solo los procesos de un dominio (prefijo del nombre del proceso), sin repetir el mismo aviso en 12 h:
     python db/monitor_etl.py --env-file .env.prod --procesos Sma Huawei Soliscloud Growatt Meteo --horas-sin-exito 16 --sin-repetir-horas 12
 
+    # Solo los procesos de ciertos dominios (columna dbo.EtlProcess.Dominio, sin depender del nombre):
+    python db/monitor_etl.py --env-file .env.prod --dominios Ventas Producto --horas-sin-exito 26
+
     # Comprobar que el canal de notificacion esta bien configurado (envia un mensaje de prueba y sale):
     python db/monitor_etl.py --env-file .env.prod --probar-notificacion
 
@@ -46,17 +49,26 @@ def obtener_alertas(env: dict, args) -> list:
             args.horas_ventana, args.horas_en_proceso, args.horas_sin_exito,
         )
         alertas = [tuple(r) for r in cur.fetchall()]
+        del_dominio = set()
+        if args.dominios:
+            cur.execute(
+                f"SELECT ProcesoNombre FROM dbo.EtlProcess WHERE Dominio IN ({', '.join('?' * len(args.dominios))})",
+                *args.dominios,
+            )
+            del_dominio = {str(r[0]).lower() for r in cur.fetchall()}
     finally:
         cnxn.close()
-    if args.procesos:
-        prefijos = tuple(p.lower() for p in args.procesos)
-        alertas = [a for a in alertas if str(a[2]).lower().startswith(prefijos)]
+    if args.procesos or args.dominios:
+        prefijos = tuple(p.lower() for p in (args.procesos or []))
+        alertas = [a for a in alertas
+                   if str(a[2]).lower() in del_dominio or (prefijos and str(a[2]).lower().startswith(prefijos))]
     return alertas
 
 
-def armar_reporte(alertas: list, env: dict, procesos: list = None) -> str:
+def armar_reporte(alertas: list, env: dict, procesos: list = None, dominios: list = None) -> str:
     criticas = [a for a in alertas if a[0] == "CRITICA"]
-    alcance = f" [{', '.join(procesos)}]" if procesos else ""
+    filtro = [f"dominio {d}" for d in (dominios or [])] + list(procesos or [])
+    alcance = f" [{', '.join(filtro)}]" if filtro else ""
     lineas = [
         f"ETL JAREMAR{alcance} ({env.get('JAREMAR_SERVER', '?')}/{env.get('JAREMAR_DATABASE', '?')}): "
         f"{len(criticas)} critica(s), {len(alertas) - len(criticas)} advertencia(s)",
@@ -126,7 +138,8 @@ def huella(alertas: list) -> str:
 
 
 def clave_estado(args) -> str:
-    return hashlib.sha1(("|".join(sorted(p.lower() for p in (args.procesos or ["*"])))).encode("utf-8")).hexdigest()[:12]
+    filtro = [p.lower() for p in (args.procesos or [])] + [f"dominio:{d.lower()}" for d in (args.dominios or [])]
+    return hashlib.sha1(("|".join(sorted(filtro or ["*"]))).encode("utf-8")).hexdigest()[:12]
 
 
 def leer_estado(ruta: Path) -> dict:
@@ -173,6 +186,9 @@ def main() -> int:
     parser.add_argument("--horas-sin-exito", type=int, default=None, help="Alerta procesos sin exito en N horas (desactivado por defecto).")
     parser.add_argument("--procesos", nargs="+", default=None, metavar="PREFIJO",
                         help="Solo considera los procesos cuyo nombre empieza por alguno de estos prefijos (ej. Sma Huawei).")
+    parser.add_argument("--dominios", nargs="+", default=None, metavar="DOMINIO",
+                        help="Solo considera los procesos de estos dominios (dbo.EtlProcess.Dominio, ej. Ventas Producto). "
+                             "Con --procesos, vale lo que cumpla cualquiera de los dos.")
     parser.add_argument("--sin-repetir-horas", type=int, default=0,
                         help="No vuelve a notificar el mismo conjunto de alertas dentro de N horas (0 = siempre notifica).")
     parser.add_argument("--estado", default=str(ESTADO_DEFECTO), help="Archivo donde se recuerda el ultimo aviso (default logs/monitor_estado.json).")
@@ -200,7 +216,7 @@ def main() -> int:
             limpiar_estado(args)
         return 0
 
-    reporte = armar_reporte(alertas, env, args.procesos)
+    reporte = armar_reporte(alertas, env, args.procesos, args.dominios)
     print(reporte)
 
     hay_criticas = any(a[0] == "CRITICA" for a in alertas)

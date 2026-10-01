@@ -67,7 +67,7 @@ $ErrorActionPreference = 'Stop'
 $NombreDiaria = 'JaremarDW-Bascula'
 $NombreReconciliar = 'JaremarDW-Bascula-Reconciliar'
 $NombreVigilante = 'JaremarDW-Bascula-Vigilante'
-$Prefijos = 'BasculaBufalo Basculas TipoBoleta LugarBascula ProductoBascula'
+$Dominios = 'Basculas'
 $HorasOmitirTrasReconciliar = 6
 
 if ($Desinstalar) {
@@ -125,7 +125,7 @@ $dispReconciliar = @(New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DiaReconcilia
 
 $argDiaria = "`"$scriptRun`" --env-file `"$envRuta`""
 $argReconciliar = "$argDiaria --reconciliar"
-$argVigilante = "`"$scriptMon`" --env-file `"$envRuta`" --procesos $Prefijos --horas-sin-exito $HorasSinExitoVigilante --sin-repetir-horas 12"
+$argVigilante = "`"$scriptMon`" --env-file `"$envRuta`" --dominios $Dominios --horas-sin-exito $HorasSinExitoVigilante --sin-repetir-horas 12"
 $dispVigilante = @($HorasVigilante | ForEach-Object { New-ScheduledTaskTrigger -Daily -At $_ })
 
 function Nueva-Tarea([string]$nombre, [string]$argumentos, $disparadores, [string]$detalle, [int]$limiteMin, [string]$descripcion) {

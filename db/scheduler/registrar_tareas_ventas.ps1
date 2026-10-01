@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Crea tres tareas:
-    JaremarDW-Ventas              corre db\scheduler\run_ventas.py (dimEmpresas + dimProducto + hecho de ventas
+    JaremarDW-Ventas              corre db\scheduler\run_ventas.py (dimProducto + hecho de ventas
                                   incremental + monitor) a las horas de -Horas (default 05:00 y 13:00).
     JaremarDW-Ventas-Reconciliar  corre run_ventas.py --reconciliar (todo el historico) el -DiaReconciliar a la
                                   -HoraReconciliar (default domingo 02:00).
@@ -63,7 +63,7 @@ $ErrorActionPreference = 'Stop'
 $NombreDiaria = 'JaremarDW-Ventas'
 $NombreReconciliar = 'JaremarDW-Ventas-Reconciliar'
 $NombreVigilante = 'JaremarDW-Ventas-Vigilante'
-$Prefijos = 'Ventas Empresas EmpresaMoneda Producto'
+$Dominios = 'Ventas Producto'
 $HorasOmitirTrasReconciliar = 6
 
 if ($Desinstalar) {
@@ -121,7 +121,7 @@ $dispReconciliar = @(New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DiaReconcilia
 
 $argDiaria = "`"$scriptRun`" --env-file `"$envRuta`""
 $argReconciliar = "$argDiaria --reconciliar"
-$argVigilante = "`"$scriptMon`" --env-file `"$envRuta`" --procesos $Prefijos --horas-sin-exito $HorasSinExitoVigilante --sin-repetir-horas 12"
+$argVigilante = "`"$scriptMon`" --env-file `"$envRuta`" --dominios $Dominios --horas-sin-exito $HorasSinExitoVigilante --sin-repetir-horas 12"
 $dispVigilante = @($HorasVigilante | ForEach-Object { New-ScheduledTaskTrigger -Daily -At $_ })
 
 function Nueva-Tarea([string]$nombre, [string]$argumentos, $disparadores, [string]$detalle, [int]$limiteMin, [string]$descripcion) {
@@ -145,7 +145,7 @@ function Nueva-Tarea([string]$nombre, [string]$argumentos, $disparadores, [strin
 
 # Limite de 2 h: coincide con el vencimiento del bloqueo logs\run_ventas.lock.
 Nueva-Tarea $NombreDiaria $argDiaria $dispDiaria ($detalleDiaria -join ', ') 120 `
-    'JaremarDW: dimEmpresas + dimProducto + ventas incremental y monitor (db\scheduler\run_ventas.py).'
+    'JaremarDW: dimProducto + ventas incremental y monitor (db\scheduler\run_ventas.py).'
 Nueva-Tarea $NombreReconciliar $argReconciliar $dispReconciliar "$DiaReconciliar $HoraReconciliar" 120 `
     'JaremarDW: reconciliacion semanal de ventas, todo el historico (db\scheduler\run_ventas.py --reconciliar).'
 Nueva-Tarea $NombreVigilante $argVigilante $dispVigilante ($HorasVigilante -join ', ') 15 `

@@ -33,12 +33,12 @@ TIMEOUT_PASO_RECONCILIAR = 3600
 
 DIMENSIONES = ["basculas", "tipoboleta", "lugarbascula", "productobascula"]
 
-# Prefijos de sus procesos en dbo.EtlProcess (para acotar el monitor).
-PREFIJOS_MONITOR = ["BasculaBufalo", "Basculas", "TipoBoleta", "LugarBascula", "ProductoBascula"]
+# Dominio de sus procesos en dbo.EtlProcess (para acotar el monitor): hecho y 4 catalogos.
+DOMINIOS_MONITOR = ["Basculas"]
 
 
 if __name__ == "__main__":
     raise SystemExit(hecho_programado.main(
-        "bascula", "bascula", DIMENSIONES, PREFIJOS_MONITOR, TIMEOUT_PASO_DEFECTO, TIMEOUT_PASO_RECONCILIAR,
-        "Corre los catalogos de bascula y el hecho factBasculaBufalo, y el monitor.",
+        "bascula", "bascula", DIMENSIONES, [], TIMEOUT_PASO_DEFECTO, TIMEOUT_PASO_RECONCILIAR,
+        "Corre los catalogos de bascula y el hecho factBasculaBufalo, y el monitor.", dominios_monitor=DOMINIOS_MONITOR,
     ))

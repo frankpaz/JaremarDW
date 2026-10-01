@@ -57,7 +57,7 @@ def registrar_proceso(cur: pyodbc.Cursor) -> int:
             @ProcesoId = @pid OUTPUT;
         SELECT @pid;
         """,
-        PROCESO, "Bascula", "int", "int", "factBasculaBufalo", "dw", "factBasculaBufalo", "Incremental",
+        PROCESO, "Basculas", "int", "int", "factBasculaBufalo", "dw", "factBasculaBufalo", "Incremental",
     )
     return cur.fetchone()[0]
 

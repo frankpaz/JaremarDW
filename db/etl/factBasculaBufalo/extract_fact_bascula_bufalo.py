@@ -106,7 +106,7 @@ def registrar_proceso(jrm_cur: pyodbc.Cursor) -> int:
             @ProcesoId = @pid OUTPUT;
         SELECT @pid;
         """,
-        PROCESO, "Bascula", "AS400/LX",
+        PROCESO, "Basculas", "AS400/LX",
         AS400_ESQUEMA_ORIGEN, AS400_TABLA_ORIGEN,
         STG_ESQUEMA, STG_TABLA, "Incremental",
     )
