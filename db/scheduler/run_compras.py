@@ -1,9 +1,10 @@
 """
-Orquestador de compras: actualiza dimEmpresas y dimProveedor (las llaves que resuelve el
-gold), corre el hecho de compras (extract encabezados -> extract lineas -> silver -> gold)
-y luego el monitor de alertas.
+Orquestador de compras: actualiza dimProveedor (la llave que resuelve el gold), corre el
+hecho de compras (extract encabezados -> extract lineas -> silver -> gold) y luego el monitor
+de alertas, acotado a los dominios Compras y Proveedor.
 
-Si una dimension falla, compras corre igual (las llaves que queden NULL se rellenan en la
+dimEmpresas no se corre aqui (cambia poco; la actualizan guias, manifiestos y
+run_dimensiones.py). Si la dimension falla, compras corre igual (las llaves que queden NULL se rellenan en la
 reconciliacion). La logica comun esta en hecho_programado.py.
 
 Uso:
@@ -29,14 +30,14 @@ import hecho_programado  # noqa: E402
 TIMEOUT_PASO_DEFECTO = 1800
 TIMEOUT_PASO_RECONCILIAR = 3600
 
-DIMENSIONES = ["empresas", "proveedor"]
+DIMENSIONES = ["proveedor"]
 
-# Prefijos de sus procesos en dbo.EtlProcess (para acotar el monitor).
-PREFIJOS_MONITOR = ["Compras", "Empresas", "EmpresaMoneda", "Proveedor"]
+# Dominios de sus procesos en dbo.EtlProcess (para acotar el monitor).
+DOMINIOS_MONITOR = ["Compras", "Proveedor"]
 
 
 if __name__ == "__main__":
     raise SystemExit(hecho_programado.main(
-        "compras", "compras", DIMENSIONES, PREFIJOS_MONITOR, TIMEOUT_PASO_DEFECTO, TIMEOUT_PASO_RECONCILIAR,
-        "Corre dimEmpresas, dimProveedor y el hecho de compras, y el monitor.",
+        "compras", "compras", DIMENSIONES, [], TIMEOUT_PASO_DEFECTO, TIMEOUT_PASO_RECONCILIAR,
+        "Corre dimProveedor y el hecho de compras, y el monitor.", dominios_monitor=DOMINIOS_MONITOR,
     ))

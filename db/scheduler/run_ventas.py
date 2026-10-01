@@ -4,7 +4,7 @@ Orquestador de ventas: actualiza dimProducto, corre el hecho de ventas
 acotado a los dominios Ventas y Producto.
 
 dimProducto va primero para que gold resuelva ProductoKey con datos frescos. dimEmpresas no
-se corre aqui (cambia poco; la actualizan compras, guias, manifiestos y run_dimensiones.py).
+se corre aqui (cambia poco; la actualizan guias, manifiestos y run_dimensiones.py).
 Si la dimension falla, ventas corre igual (las llaves que queden NULL se rellenan en la
 reconciliacion). La logica comun esta en hecho_programado.py.
 
