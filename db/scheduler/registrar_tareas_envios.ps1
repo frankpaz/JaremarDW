@@ -3,14 +3,17 @@
   Registra en el Programador de tareas de Windows la ejecucion desatendida de envios.
 
 .DESCRIPTION
-  Crea dos tareas:
+  Crea tres tareas:
     JaremarDW-Envios            corre db\scheduler\run_envios.py (dimVehiculo + hecho de envios + monitor) a
-                                las horas de -Horas (default 07:00 y 15:00).
+                                las horas de -Horas (default 15:00): compara solo los dias recientes.
+    JaremarDW-Envios-Reconciliar  corre run_envios.py --reconciliar todos los dias a -HoraReconciliar
+                                (default 07:00): compara TODOS los dias contra el AS400 (menos de 1 min).
     JaremarDW-Envios-Vigilante  corre db\monitor_etl.py acotado a envios y dimVehiculo a las horas de
                                 -HorasVigilante (default 09:00 y 17:00), para avisar si una corrida no se hizo,
                                 fallo o se colgo (alerta SIN_EXITO a -HorasSinExitoVigilante, default 6 h).
 
-  No hay tarea de reconciliacion: el extract de envios ya es FULL (ver run_envios.py).
+  El extract compara por dia la huella de los envios contra el AS400 y trae solo los dias que no
+  cuadran (migraciones 246-247); la corrida completa diaria es la que detecta correcciones de fechas viejas.
 
   Los horarios van despues de los de ventas (05:00), guias (05:30), compras (06:00) y manifiestos (06:30)
   para no cargar el AS400 con varias corridas a la vez.
@@ -25,7 +28,8 @@
 .PARAMETER RutaRepo         Carpeta del repo (default: dos niveles arriba de este script).
 .PARAMETER Python           Ejecutable de Python (default: el primero que resuelva 'python' en el PATH).
 .PARAMETER EnvFile          Archivo .env, relativo al repo o absoluto (default .env.prod).
-.PARAMETER Horas            Horas de la corrida diaria, formato HH:mm.
+.PARAMETER Horas            Horas de la corrida diaria (dias recientes), formato HH:mm.
+.PARAMETER HoraReconciliar  Hora de la corrida diaria completa (todos los dias), formato HH:mm.
 .PARAMETER HorasVigilante   Horas del vigilante, formato HH:mm.
 .PARAMETER HorasSinExitoVigilante  Horas sin exito a partir de las cuales el vigilante alerta.
 .PARAMETER Usuario          Cuenta con la que corren las tareas aunque no haya sesion iniciada (junto a -Credencial).
@@ -45,7 +49,8 @@ param(
     [string]$RutaRepo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$Python = '',
     [string]$EnvFile = '.env.prod',
-    [string[]]$Horas = @('07:00', '15:00'),
+    [string[]]$Horas = @('15:00'),
+    [string]$HoraReconciliar = '07:00',
     [string[]]$HorasVigilante = @('09:00', '17:00'),
     [int]$HorasSinExitoVigilante = 6,
     [string]$Usuario = '',
@@ -56,11 +61,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $NombreDiaria = 'JaremarDW-Envios'
+$NombreReconciliar = 'JaremarDW-Envios-Reconciliar'
 $NombreVigilante = 'JaremarDW-Envios-Vigilante'
 $Prefijos = 'Envios Vehiculo'
 
 if ($Desinstalar) {
-    foreach ($n in $NombreDiaria, $NombreVigilante) {
+    foreach ($n in $NombreDiaria, $NombreReconciliar, $NombreVigilante) {
         if (Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue) {
             if ($PSCmdlet.ShouldProcess($n, 'Eliminar tarea')) {
                 Unregister-ScheduledTask -TaskName $n -Confirm:$false
@@ -92,12 +98,14 @@ function Leer-Hora([string]$h) {
     if (-not [datetime]::TryParseExact($h, 'HH:mm', $null, 'None', [ref]$tmp)) { throw "Hora invalida '$h' (usa HH:mm)." }
     return $tmp.TimeOfDay
 }
-foreach ($h in $Horas + $HorasVigilante) { Leer-Hora $h | Out-Null }
+foreach ($h in $Horas + $HorasVigilante + $HoraReconciliar) { Leer-Hora $h | Out-Null }
 
 $dispDiaria = @($Horas | ForEach-Object { New-ScheduledTaskTrigger -Daily -At $_ })
+$dispReconciliar = @(New-ScheduledTaskTrigger -Daily -At $HoraReconciliar)
 $dispVigilante = @($HorasVigilante | ForEach-Object { New-ScheduledTaskTrigger -Daily -At $_ })
 
 $argDiaria = "`"$scriptRun`" --env-file `"$envRuta`""
+$argReconciliar = "$argDiaria --reconciliar"
 $argVigilante = "`"$scriptMon`" --env-file `"$envRuta`" --procesos $Prefijos --horas-sin-exito $HorasSinExitoVigilante --sin-repetir-horas 12"
 
 function Nueva-Tarea([string]$nombre, [string]$argumentos, $disparadores, [string]$detalle, [int]$limiteMin, [string]$descripcion) {
@@ -121,7 +129,9 @@ function Nueva-Tarea([string]$nombre, [string]$argumentos, $disparadores, [strin
 
 # Limite de 2 h: coincide con el vencimiento del bloqueo logs\run_envios.lock.
 Nueva-Tarea $NombreDiaria $argDiaria $dispDiaria ($Horas -join ', ') 120 `
-    'JaremarDW: dimVehiculo + envios (extract FULL) y monitor (db\scheduler\run_envios.py).'
+    'JaremarDW: dimVehiculo + envios (dias recientes, por huella) y monitor (db\scheduler\run_envios.py).'
+Nueva-Tarea $NombreReconciliar $argReconciliar $dispReconciliar "diaria $HoraReconciliar" 120 `
+    'JaremarDW: dimVehiculo + envios comparando todos los dias contra el AS400 (run_envios.py --reconciliar).'
 Nueva-Tarea $NombreVigilante $argVigilante $dispVigilante ($HorasVigilante -join ', ') 15 `
     "JaremarDW: vigilante de envios; avisa si no hay corridas exitosas en $HorasSinExitoVigilante h."
 

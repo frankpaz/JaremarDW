@@ -7,7 +7,7 @@ verifican por su cuenta que los extracts esten completos y frescos).
 Uso:
     python db/etl/run_fact.py ventas   [--env-file .env.prod]     # diario (incremental, ventana de 30 dias)
     python db/etl/run_fact.py compras  [--env-file .env.prod]
-    python db/etl/run_fact.py envios   [--env-file .env.prod]     # el extract es FULL (el origen no tiene fecha de modificacion)
+    python db/etl/run_fact.py envios   [--env-file .env.prod]     # por huella: trae solo los dias que no cuadran (--reconciliar compara todos)
     python db/etl/run_fact.py guias    [--env-file .env.prod]     # guias de remision: ventana de 30 dias por fecha de registro
     python db/etl/run_fact.py manifiestos [--env-file .env.prod]  # manifiestos (UNDIS002): ventana de 30 dias por fecha de la orden
     python db/etl/run_fact.py bascula  [--env-file .env.prod]     # boletas de bascula (BASMASTNN): ventana de 30 dias + abiertas, MERGE
@@ -36,8 +36,9 @@ FLUJOS = {
         ("factCompras/load_silver_fact_compras.py", False),
         ("factCompras/load_gold_fact_compras.py", True),
     ],
+    # Por huella (migraciones 246-247): compara por dia contra el AS400; --reconciliar = todos los dias.
     "envios": [
-        ("factEnvios/extract_fact_envios.py", False),
+        ("factEnvios/extract_fact_envios.py", True),
         ("factEnvios/load_silver_fact_envios.py", False),
         ("factEnvios/load_gold_fact_envios.py", True),
     ],

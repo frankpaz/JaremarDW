@@ -1,17 +1,20 @@
 """
 Orquestador de envios: actualiza dimVehiculo (la llave que resuelve el gold), corre el hecho
-de envios (extract FULL -> silver -> gold) y luego el monitor de alertas.
+de envios (extract -> silver -> gold) y luego el monitor de alertas.
 
-A diferencia de los otros hechos no lleva reconciliacion semanal: el extract ya trae todo
-ENCAB cada vez, silver da de baja lo que desaparece del AS400 y el gold rellena en cada
-corrida las VehiculoKey que la dimension resuelva despues (migracion 186). --reconciliar
-queda disponible a mano (gold recorre todo [int]), pero no hace falta programarlo.
+El extract es incremental por huella (migraciones 246-247): compara por dia los envios del
+AS400 contra [int] y trae solo los dias que no cuadran. La corrida normal compara los dias
+recientes (~8 s si no hay cambios); con --reconciliar compara todos los dias (~45 s) y gold
+recorre todo [int]. registrar_tareas_envios.ps1 programa la normal a las 15:00 y la completa
+todos los dias a las 07:00, que es la que detecta correcciones de fechas viejas. El gold
+rellena en cada corrida las VehiculoKey que la dimension resuelva despues (migracion 186).
 
 Si dimVehiculo falla, envios corre igual (las llaves que queden NULL se rellenan en la
 corrida siguiente). La logica comun esta en hecho_programado.py.
 
 Uso:
-    python db/scheduler/run_envios.py --env-file .env.prod                 # diaria
+    python db/scheduler/run_envios.py --env-file .env.prod                 # dias recientes
+    python db/scheduler/run_envios.py --env-file .env.prod --reconciliar   # todos los dias (diaria 07:00)
     python db/scheduler/run_envios.py --env-file .env.prod --solo envios   # sin actualizar dimVehiculo
     python db/scheduler/run_envios.py --dry-run
 
@@ -28,7 +31,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hecho_programado  # noqa: E402
 
-# La corrida del 2026-09-23 tardo ~4 min (extract FULL 204 s, silver 16 s, gold 13 s).
+# Con el extract FULL tardaba ~4 min (extract 204 s); por huella la normal tarda ~10 s y la
+# completa ~45 s. La primera corrida despues de la migracion 246 trae todo una vez (~4 min).
 TIMEOUT_PASO_DEFECTO = 1800
 TIMEOUT_PASO_RECONCILIAR = 3600
 
