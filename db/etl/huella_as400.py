@@ -86,6 +86,19 @@ def en_bloques(valores: list, tamano: int = TAMANO_BLOQUE_IN):
         yield valores[i:i + tamano]
 
 
+TAMANO_BLOQUE_TUPLAS = 100
+
+
+def condicion_tuplas(expresiones: list, cantidad: int) -> str:
+    """'(e1 = ? AND e2 = ?) OR (...)' para buscar en el AS400 por llaves compuestas.
+
+    expresiones: SQL DB2 de cada parte de la llave (ej. '"PLCMPY"', 'RTRIM("PLINV")').
+    Los parametros van aplanados, tupla por tupla, en el mismo orden.
+    """
+    una = "(" + " AND ".join(f"{e} = ?" for e in expresiones) + ")"
+    return " OR ".join([una] * cantidad)
+
+
 def _entero(valor):
     # Periodos y sumas llegan como Decimal (DB2 y SQL Server); se comparan como int.
     return None if valor is None else int(valor)

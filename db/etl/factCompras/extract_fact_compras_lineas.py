@@ -2,33 +2,35 @@
 Extraccion Bronze: AS400/LX (PROLX835F.APL, PLID='PL') -> stg.factComprasLineas
 en JAREMAR.
 
-APL es el detalle contable de facturas de proveedor del ERP (Infor
-Distribution SX.e, "Payables Line File") -- no tiene detalle de producto ni
-cantidad (a diferencia de SIL en ventas), es mas bien la distribucion
-contable/centro de costo de cada factura.
+APL es el detalle contable de facturas de proveedor del ERP ("Payables Line
+File"): no tiene producto ni cantidad, es la distribucion contable de cada
+factura. Historia desde 2004, util desde 2019 (antes el ERP purgo lineas).
 
-INCREMENTAL desde el arranque (a diferencia de factVentas, que empezo FULL
-y migro despues): APH/APL tienen historia completa desde 2004 (no una
-ventana viva del ERP), y APL.PLEDTE ("Created On Date") es una columna de
-auditoria confiable -- a diferencia de SIL, aqui el campo de auditoria vive
-en la linea, no en el encabezado. Se extrae con margen de seguridad hacia
-atras (MARGEN_DIAS) por si hay correcciones tardias. El watermark
-("Compras", compartido con extract_fact_compras_encabezados.py) lo
-actualiza SOLO load_silver_fact_compras.py tras un merge exitoso -- este
-script solo lo LEE.
+Carga incremental por huella (migraciones 248-250, ver db/etl/huella_as400.py).
+Corre DESPUES del extract de encabezados (usa lo que este dejo en stg):
+  1. Compara por dia de creacion (PLEDTE tal cual del AS400; 0 para las 1.302
+     lineas sin fecha, que antes nunca se cargaban) la cantidad de lineas y la
+     suma de sus huellas contra [int].factCompras, y trae las lineas de los dias
+     que no cuadran (quedan en stg.factComprasLineas_Periodos). La corrida normal
+     compara los ultimos DIAS_RECIENTES dias y las fechas posteriores;
+     --reconciliar compara todos.
+  2. Trae tambien las lineas de los encabezados nuevos o cambiados (pagos) que
+     esten en [int] fuera de esos dias, para refrescar sus datos de encabezado.
+  3. Agrega a stg.factComprasEncabezados los encabezados que les falten a las
+     lineas traidas (todos los del documento, para que silver sepa si es uno solo).
+Las lineas vigentes de [int] de un dia revisado que no vinieron ya no estan en el
+AS400 (la fecha es parte de la llave): silver las da de baja.
 
-Columnas elegidas tras analisis de poblacion real sobre 715323 filas
-(2026-09-22, ver db/discovery/discover_columnas.py --poblacion): se
-descartaron columnas con 0% de uso (PLDSC, PLBDSC, PLSOUR, PLCCEX, PLBCEX,
-PLRVDT, PLRPDT). Llave de negocio PLCMPY+PLDCPX+PLDCYR+PLDCSQ+PLLINE, casi
-unica (714415 distintos de 715323 filas).
+Llave: compania + prefijo + anio + secuencia + linea + proveedor + factura
+(PLVNDR/PLINV) + fecha de creacion (PLEDTE; el ERP recaptura algunas lineas otro
+dia con la misma llave). Las lineas repetidas del mismo dia se guardan una vez en
+[int] con Repeticiones y la suma de sus huellas.
 
-Se extrae e inserta en lotes (fetchmany) porque el volumen (>700k filas en
-la primera corrida) puede hacer que el driver ODBC del AS400 muera a mitad
-de la extraccion sin excepcion capturable (ver factVentas, Fase 1).
+Se extrae e inserta en lotes (fetchmany): el driver ODBC del AS400 puede morir a
+mitad de una extraccion grande sin excepcion capturable (ver factVentas).
 
 Uso:
-    python db/etl/factCompras/extract_fact_compras_lineas.py [--env-file .env]
+    python db/etl/factCompras/extract_fact_compras_lineas.py [--env-file .env] [--reconciliar]
 """
 import argparse
 import datetime
@@ -38,19 +40,29 @@ from pathlib import Path
 
 import pyodbc
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import huella_as400  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import extract_fact_compras_encabezados as enc  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_CACHE_DIR = Path(__file__).resolve().parent / "schema_cache"
 
 PROCESO = "Compras_Lineas"
-PROCESO_WATERMARK = "Compras"
-MARGEN_DIAS = 30
 AS400_ESQUEMA_ORIGEN = "PROLX835F"
 AS400_TABLA_ORIGEN = "APL"
 FILTRO_COLUMNA = "PLID"
 FILTRO_VALOR = "PL"
+COLUMNA_PERIODO = "PLEDTE"
 STG_ESQUEMA = "stg"
 STG_TABLA = "factComprasLineas"
+STG_PERIODOS = "stg.factComprasLineas_Periodos"
+INT_TABLA = "[int].factCompras"
+DIAS_RECIENTES = 45
 TAMANO_LOTE = 10000
+# Con mas documentos sin encabezado que esto, se traen por dia en vez de documento por documento.
+MAX_DOCUMENTOS_POR_TUPLAS = 2000
 
 COLUMNAS_DESEADAS = [
     "PLCMPY", "PLDCPX", "PLDCYR", "PLDCSQ", "PLLINE",
@@ -133,14 +145,6 @@ def finalizar_run(jrm_cur, run_id, estado, **kwargs):
     )
 
 
-def obtener_watermark(jrm_cur: pyodbc.Cursor) -> "datetime.date | None":
-    jrm_cur.execute("EXEC dbo.usp_Etl_WatermarkObtener @Proceso = ?", PROCESO_WATERMARK)
-    row = jrm_cur.fetchone()
-    if row is None or row[1] is None:
-        return None
-    return row[1].date() if hasattr(row[1], "date") else row[1]
-
-
 def registrar_error_fila(jrm_cur, run_id, llave_negocio, payload, mensaje_error):
     jrm_cur.execute(
         "EXEC dbo.usp_Etl_ErrorRegistrar @RunId = ?, @LlaveNegocio = ?, @Payload = ?, @MensajeError = ?",
@@ -184,6 +188,7 @@ def obtener_columnas_origen(as400_cur: pyodbc.Cursor) -> list:
             encontradas[row.column_name.upper()] = {
                 "nombre": row.column_name,
                 "tipo_sql_server": mapear_tipo_sql_server(row.type_name, row.column_size, row.decimal_digits),
+                "es_texto": huella_as400.es_tipo_texto(row.type_name),
             }
 
     faltantes = deseadas - encontradas.keys()
@@ -204,7 +209,7 @@ def _columnas_actuales_stg(jrm_cur: pyodbc.Cursor) -> set:
 
 
 def asegurar_tabla_stg(jrm_cur: pyodbc.Cursor, columnas: list) -> str:
-    esperadas = {c["nombre"].upper() for c in columnas} | {"FECHACARGASTG", "RUNID"}
+    esperadas = {c["nombre"].upper() for c in columnas} | {"HUELLA", "FECHACARGASTG", "RUNID"}
     actuales = _columnas_actuales_stg(jrm_cur)
 
     if actuales and actuales != esperadas:
@@ -219,6 +224,7 @@ def asegurar_tabla_stg(jrm_cur: pyodbc.Cursor, columnas: list) -> str:
 BEGIN
     CREATE TABLE {STG_ESQUEMA}.{STG_TABLA} (
     {cols_ddl},
+    [HUELLA] BIGINT NULL,
     [FechaCargaStg] DATETIME2(7) NOT NULL CONSTRAINT DF_{STG_TABLA}_FechaCargaStg DEFAULT (SYSDATETIME()),
     [RunId] INT NULL
     );
@@ -231,15 +237,68 @@ END
     return ddl
 
 
+# --- Comparacion por periodo ------------------------------------------------
+
+def verificar_extract_encabezados(jrm_cur) -> None:
+    """Las lineas usan los encabezados que dejo en stg el extract de encabezados de este ciclo."""
+    jrm_cur.execute(
+        """
+        SELECT TOP 1 r.FechaInicio FROM dbo.EtlRunLog r
+        JOIN dbo.EtlProcess p ON p.ProcesoId = r.ProcesoId
+        WHERE p.ProcesoNombre = 'Compras_Silver' AND r.Estado = 'EXITO' ORDER BY r.RunId DESC
+        """
+    )
+    row = jrm_cur.fetchone()
+    ultimo_silver = row[0] if row else None
+    jrm_cur.execute(
+        """
+        SELECT TOP 1 r.Estado, r.FechaFin FROM dbo.EtlRunLog r
+        JOIN dbo.EtlProcess p ON p.ProcesoId = r.ProcesoId
+        WHERE p.ProcesoNombre = ? ORDER BY r.RunId DESC
+        """,
+        enc.PROCESO,
+    )
+    row = jrm_cur.fetchone()
+    if row is None or row[0] not in ("EXITO", "ADVERTENCIA"):
+        raise RuntimeError(f"El extract {enc.PROCESO} no termino bien; correrlo antes que las lineas.")
+    if ultimo_silver is not None and row[1] is not None and row[1] <= ultimo_silver:
+        raise RuntimeError(f"El extract {enc.PROCESO} no se ha vuelto a correr desde el ultimo Silver; correrlo antes que las lineas.")
+
+
+def periodos_a_extraer(jrm_cur, as400_cur, columnas: list, desde) -> tuple:
+    """Compara por dia de creacion el AS400 contra [int]; (dias comparados, distintos)."""
+    expr = huella_as400.expresion_huella(columnas)
+    filtro_origen, params_origen = f'"{FILTRO_COLUMNA}" = ?', [FILTRO_VALOR]
+    filtro_local, params_local = "1 = 1", []
+    if desde is not None:
+        filtro_origen += f' AND "{COLUMNA_PERIODO}" >= ?'
+        params_origen.append(desde)
+        filtro_local, params_local = "PeriodoOrigen >= ?", [desde]
+    origen = huella_as400.checksum_as400(
+        as400_cur, f"{AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN}", COLUMNA_PERIODO,
+        filtro_origen, params_origen, expr,
+    )
+    local = huella_as400.checksum_local(jrm_cur, INT_TABLA, "PeriodoOrigen", filtro_local, params_local)
+    return len(origen.keys() | local.keys()), huella_as400.periodos_distintos(origen, local)
+
+
+def registrar_periodos(jrm_conn, jrm_cur, periodos: list, run_id: int) -> None:
+    """Deja en stg los dias que el extract trae completos (silver solo da de baja en ellos)."""
+    jrm_cur.execute(f"TRUNCATE TABLE {STG_PERIODOS}")
+    if periodos:
+        jrm_cur.executemany(f"INSERT INTO {STG_PERIODOS} (Periodo, RunId) VALUES (?, ?)",
+                            [(p, run_id) for p in periodos])
+    jrm_conn.commit()
+
+
 # --- Extraccion / carga por lotes -------------------------------------------
 
-def ejecutar_consulta_origen(as400_cur: pyodbc.Cursor, columnas: list, desde_yyyymmdd: int) -> None:
+def consulta_origen(columnas: list) -> str:
+    # DB2 for i no soporta corchetes para identificadores -- se usan comillas dobles.
     nombres = ", ".join(f'"{c["nombre"]}"' for c in columnas)
-    as400_cur.execute(
-        f'SELECT {nombres} FROM {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN} '
-        f'WHERE "{FILTRO_COLUMNA}" = ? AND "PLEDTE" >= ?',
-        FILTRO_VALOR, desde_yyyymmdd,
-    )
+    expr = huella_as400.expresion_huella(columnas)
+    return (f'SELECT {nombres}, {expr} AS "HUELLA" FROM {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN} '
+            f"WHERE \"{FILTRO_COLUMNA}\" = '{FILTRO_VALOR}'")
 
 
 def cargar_lote(jrm_conn, jrm_cur, insert_sql: str, nombres_cols: list, llave_idx, lote: list, run_id: int) -> tuple:
@@ -267,37 +326,121 @@ def cargar_lote(jrm_conn, jrm_cur, insert_sql: str, nombres_cols: list, llave_id
     return insertadas, rechazadas
 
 
-def extraer_y_cargar_por_lotes(jrm_conn, jrm_cur, as400_cur, columnas: list, run_id: int) -> tuple:
-    nombres_cols = [c["nombre"] for c in columnas]
-    llave_idx = nombres_cols.index("PLLINE") if "PLLINE" in nombres_cols else None
+class Cargador:
+    """Inserta en una tabla de stg filas del AS400 (columnas + HUELLA) y lleva la cuenta."""
 
-    jrm_cur.execute(f"TRUNCATE TABLE {STG_ESQUEMA}.{STG_TABLA}")
+    def __init__(self, jrm_conn, jrm_cur, tabla: str, columnas: list, llave: str, run_id: int):
+        self.jrm_conn, self.jrm_cur, self.run_id = jrm_conn, jrm_cur, run_id
+        self.nombres = [c["nombre"] for c in columnas] + ["HUELLA"]
+        cols = ", ".join(f"[{n}]" for n in self.nombres) + ", [RunId]"
+        marcas = ", ".join(["?"] * (len(self.nombres) + 1))
+        self.insert_sql = f"INSERT INTO {tabla} ({cols}) VALUES ({marcas})"
+        self.llave_idx = self.nombres.index(llave)
+        self.leidas = self.insertadas = self.rechazadas = 0
 
-    col_list_sql = ", ".join(f"[{n}]" for n in nombres_cols) + ", [RunId]"
-    placeholders = ", ".join(["?"] * (len(nombres_cols) + 1))
-    insert_sql = f"INSERT INTO {STG_ESQUEMA}.{STG_TABLA} ({col_list_sql}) VALUES ({placeholders})"
+    def cargar(self, filas: list) -> None:
+        for i in range(0, len(filas), TAMANO_LOTE):
+            lote = filas[i:i + TAMANO_LOTE]
+            self.leidas += len(lote)
+            ins, rech = cargar_lote(self.jrm_conn, self.jrm_cur, self.insert_sql, self.nombres,
+                                    self.llave_idx, lote, self.run_id)
+            self.insertadas += ins
+            self.rechazadas += rech
 
-    total_leidas = total_insertadas = total_rechazadas = 0
-    while True:
-        lote = as400_cur.fetchmany(TAMANO_LOTE)
-        if not lote:
-            break
-        total_leidas += len(lote)
-        insertadas, rechazadas = cargar_lote(jrm_conn, jrm_cur, insert_sql, nombres_cols, llave_idx, lote, run_id)
-        total_insertadas += insertadas
-        total_rechazadas += rechazadas
-        print(f"  Lote de {len(lote)} filas -> insertadas {insertadas} / rechazadas {rechazadas} (acumulado: {total_leidas})", flush=True)
+    def cargar_cursor(self, as400_cur, filtro=None) -> None:
+        while True:
+            lote = as400_cur.fetchmany(TAMANO_LOTE)
+            if not lote:
+                break
+            self.cargar([f for f in lote if filtro is None or filtro(f)])
 
-    return total_leidas, total_insertadas, total_rechazadas
+
+def buscar_por_tuplas(as400_cur, base: str, expresiones: list, tuplas: list):
+    """Filas del AS400 de base (que ya trae su WHERE) cuya llave compuesta esta en tuplas."""
+    filas = []
+    for bloque in huella_as400.en_bloques(tuplas, huella_as400.TAMANO_BLOQUE_TUPLAS):
+        condicion = huella_as400.condicion_tuplas(expresiones, len(bloque))
+        as400_cur.execute(f"{base} AND ({condicion})", *[v for t in bloque for v in t])
+        filas.extend(as400_cur.fetchall())
+    return filas
+
+
+def lineas_de_encabezados_cambiados(jrm_cur) -> list:
+    """Documentos con algun encabezado nuevo o cambiado que tienen lineas en [int] fuera de los
+    dias revisados: hay que volver a traer esas lineas para refrescar sus datos de encabezado."""
+    jrm_cur.execute(
+        f"""
+        ;WITH Cambiados AS (
+            SELECT DISTINCT e.APCMPY, e.PHDCPX, e.PHDCYR, e.PHDCSQ
+            FROM {enc.STG_ESQUEMA}.{enc.STG_TABLA} e
+            LEFT JOIN {enc.INT_CONTROL} c
+              ON c.APCMPY = e.APCMPY AND c.PHDCPX = e.PHDCPX AND c.PHDCYR = e.PHDCYR AND c.PHDCSQ = e.PHDCSQ
+             AND c.APVNDR = ISNULL(e.APVNDR, 0) AND c.APINV = ISNULL(RTRIM(e.APINV), N'')
+            WHERE c.APCMPY IS NULL OR c.EsVigente = 0
+               OR ISNULL(c.HuellaOrigen, -1) <> CAST(e.HUELLA AS DECIMAL(30,0))
+        )
+        SELECT DISTINCT i.PLCMPY, i.PLDCPX, i.PLDCYR, i.PLDCSQ
+        FROM {INT_TABLA} i
+        JOIN Cambiados c ON c.APCMPY = i.PLCMPY AND c.PHDCPX = i.PLDCPX AND c.PHDCYR = i.PLDCYR AND c.PHDCSQ = i.PLDCSQ
+        WHERE i.EsVigente = 1
+          AND NOT EXISTS (SELECT 1 FROM {STG_PERIODOS} p WHERE p.Periodo = i.PeriodoOrigen)
+        """
+    )
+    return [tuple(r) for r in jrm_cur.fetchall()]
+
+
+def documentos_sin_encabezado(jrm_cur) -> list:
+    """Documentos de lineas de stg sin su encabezado exacto (documento + proveedor + factura) en stg."""
+    jrm_cur.execute(
+        f"""
+        SELECT DISTINCT l.PLCMPY, l.PLDCPX, l.PLDCYR, l.PLDCSQ
+        FROM {STG_ESQUEMA}.{STG_TABLA} l
+        WHERE NOT EXISTS (SELECT 1 FROM {enc.STG_ESQUEMA}.{enc.STG_TABLA} e
+                          WHERE e.APCMPY = l.PLCMPY AND e.PHDCPX = l.PLDCPX AND e.PHDCYR = l.PLDCYR
+                            AND e.PHDCSQ = l.PLDCSQ AND ISNULL(e.APVNDR, 0) = ISNULL(l.PLVNDR, -1)
+                            AND ISNULL(RTRIM(e.APINV), N'') = ISNULL(RTRIM(l.PLINV), N''))
+        """
+    )
+    return [tuple(r) for r in jrm_cur.fetchall()]
+
+
+def encabezados_en_stg(jrm_cur) -> set:
+    """Llaves (documento + proveedor + factura) de los encabezados que ya estan en stg."""
+    jrm_cur.execute(
+        f"SELECT APCMPY, PHDCPX, PHDCYR, PHDCSQ, ISNULL(APVNDR, 0), ISNULL(RTRIM(APINV), N'') "
+        f"FROM {enc.STG_ESQUEMA}.{enc.STG_TABLA}"
+    )
+    return {llave_encabezado(r) for r in jrm_cur.fetchall()}
+
+
+def encabezados_de_dias(as400_cur, columnas_enc: list, periodos: list) -> list:
+    """Encabezados de los documentos que tienen lineas en esos dias de creacion (una consulta por
+    bloque de dias; mas rapido que buscar documento por documento cuando son muchos)."""
+    tabla = f"{enc.AS400_ESQUEMA_ORIGEN}.{enc.AS400_TABLA_ORIGEN}"
+    filas = []
+    for bloque in huella_as400.en_bloques(periodos):
+        marcas = ", ".join(["?"] * len(bloque))
+        as400_cur.execute(
+            f"{enc.consulta_origen(columnas_enc)} AND EXISTS ("
+            f"SELECT 1 FROM {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN} l "
+            f"WHERE l.\"{FILTRO_COLUMNA}\" = '{FILTRO_VALOR}' AND l.\"PLCMPY\" = {tabla}.\"APCMPY\" "
+            f"AND l.\"PLDCPX\" = {tabla}.\"PHDCPX\" AND l.\"PLDCYR\" = {tabla}.\"PHDCYR\" "
+            f"AND l.\"PLDCSQ\" = {tabla}.\"PHDCSQ\" AND l.\"{COLUMNA_PERIODO}\" IN ({marcas}))",
+            *bloque,
+        )
+        filas.extend(as400_cur.fetchall())
+    return filas
+
+
+def llave_encabezado(fila) -> tuple:
+    return (int(fila[0]), fila[1].strip(), int(fila[2]), int(fila[3]), int(fila[4] or 0), (fila[5] or "").strip())
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
-    parser.add_argument(
-        "--reconciliar", action="store_true",
-        help="Ignora el watermark y extrae todo el historico (reconciliacion semanal).",
-    )
+    parser.add_argument("--reconciliar", action="store_true",
+                        help="Compara todos los dias de creacion, no solo los recientes.")
     args = parser.parse_args()
 
     env = load_env(Path(args.env_file))
@@ -322,31 +465,64 @@ def main() -> int:
         return 1
 
     try:
+        verificar_extract_encabezados(jrm_cur)
         as400_cur = as400_conn.cursor()
         columnas = obtener_columnas_origen(as400_cur)
         print(f"Columnas detectadas en {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN}: {len(columnas)}")
 
         asegurar_tabla_stg(jrm_cur, columnas)
+        jrm_cur.execute(f"TRUNCATE TABLE {STG_ESQUEMA}.{STG_TABLA}")
         jrm_conn.commit()
 
-        watermark = obtener_watermark(jrm_cur)
-        if args.reconciliar:
-            desde = datetime.date(1900, 1, 1)
-            print("Modo RECONCILIACION: se extrae todo el historico (se ignora el watermark).")
-        else:
-            desde = (watermark or datetime.date(1900, 1, 1)) - datetime.timedelta(days=MARGEN_DIAS)
-        desde_yyyymmdd = int(desde.strftime("%Y%m%d"))
-        print(f"Watermark actual ({PROCESO_WATERMARK}): {watermark} -> extrayendo desde {desde} (margen {MARGEN_DIAS}d)")
+        # 1. Lineas de los dias de creacion que no cuadran.
+        desde = None
+        if not args.reconciliar:
+            desde = int((datetime.date.today() - datetime.timedelta(days=DIAS_RECIENTES)).strftime("%Y%m%d"))
+        comparados, periodos = periodos_a_extraer(jrm_cur, as400_cur, columnas, desde)
+        alcance = "todos los dias" if desde is None else f"dias desde {desde}"
+        print(f"Comparacion de lineas ({alcance}): {comparados} dias, {len(periodos)} no cuadran")
+        registrar_periodos(jrm_conn, jrm_cur, periodos, run_id)
 
-        ejecutar_consulta_origen(as400_cur, columnas, desde_yyyymmdd)
-        filas_leidas, insertadas, rechazadas = extraer_y_cargar_por_lotes(
-            jrm_conn, jrm_cur, as400_cur, columnas, run_id
-        )
-        print(f"Total leidas: {filas_leidas} / Insertadas: {insertadas} / Rechazadas: {rechazadas}")
+        lineas = Cargador(jrm_conn, jrm_cur, f"{STG_ESQUEMA}.{STG_TABLA}", columnas, "PLDCSQ", run_id)
+        base = consulta_origen(columnas)
+        for bloque in huella_as400.en_bloques(periodos):
+            marcas = ", ".join(["?"] * len(bloque))
+            as400_cur.execute(f'{base} AND "{COLUMNA_PERIODO}" IN ({marcas})', *bloque)
+            lineas.cargar_cursor(as400_cur)
+            print(f"  {lineas.leidas} lineas traidas", flush=True)
+
+        # 2. Lineas de encabezados que cambiaron (fuera de los dias ya traidos).
+        revisados = set(periodos)
+        idx_periodo = [c["nombre"] for c in columnas].index(COLUMNA_PERIODO)
+        documentos = lineas_de_encabezados_cambiados(jrm_cur)
+        antes = lineas.leidas
+        filas = buscar_por_tuplas(as400_cur, base, ['"PLCMPY"', '"PLDCPX"', '"PLDCYR"', '"PLDCSQ"'], documentos)
+        lineas.cargar([f for f in filas if int(f[idx_periodo]) not in revisados])
+        print(f"Lineas de encabezados que cambiaron: {lineas.leidas - antes} (de {len(documentos)} documentos)")
+
+        # 3. Encabezados que les falten a las lineas traidas: se traen todos los del documento,
+        #    para que silver sepa si el documento tiene un solo encabezado.
+        faltan = documentos_sin_encabezado(jrm_cur)
+        columnas_enc = enc.obtener_columnas_origen(as400_cur)
+        encabezados = Cargador(jrm_conn, jrm_cur, f"{enc.STG_ESQUEMA}.{enc.STG_TABLA}", columnas_enc, "PHDCSQ", run_id)
+        if faltan:
+            presentes = encabezados_en_stg(jrm_cur)
+            if len(faltan) <= MAX_DOCUMENTOS_POR_TUPLAS:
+                filas = buscar_por_tuplas(as400_cur, enc.consulta_origen(columnas_enc),
+                                          ['"APCMPY"', '"PHDCPX"', '"PHDCYR"', '"PHDCSQ"'], faltan)
+            else:
+                filas = encabezados_de_dias(as400_cur, columnas_enc, periodos)
+            nombres = [c["nombre"] for c in columnas_enc]
+            pos = [nombres.index(c) for c in ("APCMPY", "PHDCPX", "PHDCYR", "PHDCSQ", "APVNDR", "APINV")]
+            encabezados.cargar([f for f in filas if llave_encabezado([f[i] for i in pos]) not in presentes])
+        print(f"Encabezados agregados para las lineas: {encabezados.leidas} (de {len(faltan)} documentos)")
+
+        rechazadas = lineas.rechazadas + encabezados.rechazadas
+        print(f"Total leidas: {lineas.leidas} / Insertadas: {lineas.insertadas} / Rechazadas: {lineas.rechazadas}")
 
         finalizar_run(
             jrm_cur, run_id, "EXITO" if rechazadas == 0 else "ADVERTENCIA",
-            filas_leidas=filas_leidas, filas_insertadas=insertadas, filas_rechazadas=rechazadas,
+            filas_leidas=lineas.leidas, filas_insertadas=lineas.insertadas, filas_rechazadas=rechazadas,
         )
         jrm_conn.commit()
     except Exception as exc:

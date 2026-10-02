@@ -30,6 +30,8 @@ FLUJOS = {
         ("factVentas/load_silver_fact_ventas.py", False),
         ("factVentas/load_gold_fact_ventas.py", True),
     ],
+    # Por huella (migraciones 248-250): encabezados por dia de factura y lineas por dia de creacion;
+    # --reconciliar = todos los dias.
     "compras": [
         ("factCompras/extract_fact_compras_encabezados.py", True),
         ("factCompras/extract_fact_compras_lineas.py", True),

@@ -1,19 +1,22 @@
 """
 Silver: stg.factComprasLineas + stg.factComprasEncabezados -> [int].factCompras
-(tipado, join lineas+encabezado, dedup por llave compuesta).
+(tipado, join lineas+encabezado, dedup por llave compuesta, MERGE por huella).
 
 Todo ocurre dentro de JAREMAR -- el trabajo real lo hace
-[int].usp_MergeFactCompras; este script solo orquesta el ciclo de control
-(registro de proceso, log de corrida, watermark).
+[int].usp_MergeFactCompras (migracion 249); este script solo orquesta el ciclo
+de control (registro de proceso, log de corrida, watermark).
 
-Este es el UNICO paso que mueve el watermark compartido "Compras" (los dos
-extract solo lo leen) -- se hace despues de un merge exitoso, tomando
-MAX(PLEDTE) real de [int].factCompras en vez de datetime.now(), porque
-[int] es aditivo (nunca se borra nada, patron incremental puro) y su
-maximo solo puede crecer con el tiempo.
+stg solo trae los dias que no cuadraron con el AS400 (ver los extracts). Silver
+actualiza el control de huellas de encabezados, inserta y actualiza lineas, y da
+de baja (EsVigente = 0, nunca borra) lo que ya no esta en el AS400 dentro de los
+dias revisados. Si daria de baja mas de --max-bajas lineas o encabezados, aborta
+sin tocar nada.
+
+Sigue moviendo el watermark "Compras" con MAX(PLEDTE) de [int] como referencia
+de frescura; los extracts ya no lo usan para acotar lo que traen.
 
 Uso:
-    python db/etl/factCompras/load_silver_fact_compras.py [--env-file .env]
+    python db/etl/factCompras/load_silver_fact_compras.py [--env-file .env] [--max-bajas N]
 """
 import argparse
 import datetime
@@ -24,6 +27,7 @@ import pyodbc
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 PROCESO = "Compras_Silver"
+MAX_BAJAS = 200
 
 
 def load_env(path: Path) -> dict:
@@ -86,10 +90,9 @@ def finalizar_run(cur, run_id, estado, **kwargs):
 def verificar_extracts_completos(cur: pyodbc.Cursor, extracts: list) -> None:
     """Aborta si los extracts (encabezados + lineas) no estan completos y frescos.
 
-    Ambos extracts deben usar la misma ventana (el mismo watermark) porque el
-    merge Silver cruza lineas con encabezados; si uno fallo a medias o no se
-    corrio desde el ultimo Silver exitoso, mezclar y avanzar el watermark
-    dejaria datos perdidos o encabezados NULL en las lineas.
+    Silver da de baja lo que falte en los dias que trajeron los extracts y cruza
+    lineas con encabezados: con un stg incompleto o viejo marcaria como no
+    vigentes filas buenas o dejaria encabezados NULL en las lineas.
     """
     cur.execute(
         """
@@ -124,6 +127,8 @@ def verificar_extracts_completos(cur: pyodbc.Cursor, extracts: list) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
+    parser.add_argument("--max-bajas", type=int, default=MAX_BAJAS,
+                        help=f"Maximo de lineas o encabezados que una corrida puede dar de baja (default {MAX_BAJAS}).")
     args = parser.parse_args()
 
     env = load_env(Path(args.env_file))
@@ -142,11 +147,13 @@ def main() -> int:
 
     try:
         verificar_extracts_completos(cur, ["Compras_Encabezados", "Compras_Lineas"])
-        cur.execute("EXEC [int].usp_MergeFactCompras @RunId = ?", run_id)
-        filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas = cur.fetchone()
+        cur.execute("EXEC [int].usp_MergeFactCompras @RunId = ?, @MaxBajas = ?", run_id, args.max_bajas)
+        (filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas,
+         filas_bajas, encabezados_bajas) = cur.fetchone()
         print(
             f"Leidas: {filas_leidas} / Insertadas: {filas_insertadas} / "
-            f"Actualizadas: {filas_actualizadas} / Sin cambio: {filas_ignoradas}"
+            f"Actualizadas: {filas_actualizadas} / Sin cambio: {filas_ignoradas} / "
+            f"Dadas de baja: {filas_bajas} (encabezados: {encabezados_bajas})"
         )
 
         finalizar_run(
@@ -155,7 +162,7 @@ def main() -> int:
             filas_actualizadas=filas_actualizadas, filas_ignoradas=filas_ignoradas,
         )
 
-        cur.execute("SELECT MAX(PLEDTE) FROM [int].factCompras")
+        cur.execute("SELECT MAX(PLEDTE) FROM [int].factCompras WHERE EsVigente = 1 AND PLEDTE <= CAST(GETDATE() AS DATE)")
         nuevo_max = cur.fetchone()[0]
         if nuevo_max is not None:
             nueva_fecha_hora = datetime.datetime.combine(nuevo_max, datetime.time())

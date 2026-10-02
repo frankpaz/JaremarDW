@@ -3,13 +3,19 @@ Orquestador de compras: actualiza dimProveedor (la llave que resuelve el gold), 
 hecho de compras (extract encabezados -> extract lineas -> silver -> gold) y luego el monitor
 de alertas, acotado a los dominios Compras y Proveedor.
 
+El hecho es incremental por huella (migraciones 248-250): los extracts comparan por dia
+encabezados (AINVDT) y lineas (PLEDTE) contra [int] y traen solo lo que no cuadra. La corrida
+normal compara los dias recientes; con --reconciliar compara todos los dias (~3 min) y gold
+recorre todo [int]. registrar_tareas_compras.ps1 programa la completa todos los dias a las 06:00
+y la normal a las 14:00.
+
 dimEmpresas no se corre aqui (cambia poco; la actualizan guias, manifiestos y
-run_dimensiones.py). Si la dimension falla, compras corre igual (las llaves que queden NULL se rellenan en la
-reconciliacion). La logica comun esta en hecho_programado.py.
+run_dimensiones.py). Si la dimension falla, compras corre igual (las llaves que queden NULL se
+rellenan en la siguiente corrida completa). La logica comun esta en hecho_programado.py.
 
 Uso:
-    python db/scheduler/run_compras.py --env-file .env.prod                 # diaria (incremental, ventana de 30 dias)
-    python db/scheduler/run_compras.py --env-file .env.prod --reconciliar   # semanal: todo el historico
+    python db/scheduler/run_compras.py --env-file .env.prod                 # dias recientes
+    python db/scheduler/run_compras.py --env-file .env.prod --reconciliar   # todos los dias (diaria 06:00)
     python db/scheduler/run_compras.py --env-file .env.prod --solo compras  # sin actualizar dimensiones
     python db/scheduler/run_compras.py --dry-run
 
@@ -26,7 +32,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hecho_programado  # noqa: E402
 
-# La carga completa del 2026-09-23 tardo ~11 min (encabezados 5,5 min, lineas 4,7 min).
+# La carga completa del 2026-09-23 tardo ~11 min (encabezados 5,5 min, lineas 4,7 min); por
+# huella la primera corrida trae todo una vez y despues solo lo que no cuadra.
 TIMEOUT_PASO_DEFECTO = 1800
 TIMEOUT_PASO_RECONCILIAR = 3600
 
