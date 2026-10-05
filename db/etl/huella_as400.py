@@ -39,11 +39,12 @@ def expresion_huella(columnas: list, alias: str = "") -> str:
     """Expresion DB2 for i (BIGINT) con la huella de la fila.
 
     columnas: lista de dicts con "nombre" y "es_texto", en un orden fijo (el orden forma parte
-    de la huella). El texto va con RTRIM para que los blancos de relleno no cuenten.
+    de la huella). El texto va con RTRIM para que los blancos de relleno no cuenten. Una columna
+    puede traer su propio "alias" (huella de una fila armada con un JOIN, ej. linea + encabezado).
     """
     partes = []
     for c in columnas:
-        col = f'{alias}"{c["nombre"]}"'
+        col = f'{c.get("alias", alias)}"{c["nombre"]}"'
         valor = f"RTRIM({col})" if c["es_texto"] else f"CHAR({col})"
         partes.append(f"COALESCE({valor}, '{MARCA_NULL}')")
     texto = f" || '{SEPARADOR}' || ".join(partes)

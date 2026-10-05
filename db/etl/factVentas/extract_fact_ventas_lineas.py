@@ -2,36 +2,36 @@
 Extraccion Bronze: AS400/LX (PROLX835F.SIL, ILID='IL') -> stg.factVentasLineas
 en JAREMAR.
 
-SIL es el detalle de linea de factura del ERP (Infor Distribution SX.e).
-Ademas de las filas 'IL' (linea normal) tiene un pequeno subconjunto 'IX'
-(otro layout logico dentro del mismo archivo fisico) que se excluye por
-completo -- no comparte el mismo significado de columnas.
+SIL es el detalle de linea de factura del ERP. Ademas de las filas 'IL' (linea normal) tiene un
+pequeno subconjunto 'IX' (otro layout logico dentro del mismo archivo fisico) que se excluye por
+completo -- no comparte el mismo significado de columnas. Columnas elegidas tras analisis de
+poblacion real (2026-09-22): se descartaron ~60 columnas con 0% de uso.
 
-Columnas elegidas tras analisis de poblacion real sobre 1546529 filas
-(2026-09-22): se descartaron ~60 columnas con 0% de uso (bloque POD salvo
-ILPCST, catch-weight, comisiones de articulo/cliente sin uso, 8 de los 10
-pares de impuesto, etc). Llave de negocio verificada casi unica:
-ILCOMP+ILDPFX+ILDOCN+ILDYR+ILDTYP+ILLINE (1546520 distintos de 1546529).
+Carga incremental por huella (migraciones 253-255, ver db/etl/huella_as400.py). Corre ANTES del
+extract de encabezados:
+  1. Compara por dia de factura (ILDATE tal cual del AS400) la cantidad de lineas y la suma de sus
+     huellas contra [int].factVentas. La huella de cada linea incluye las columnas del encabezado
+     que viajan a la linea (JOIN exacto a SIH por compania + documento + SIINVD = ILDATE), asi que
+     un cambio en el encabezado tambien hace que el dia no cuadre. La corrida normal compara los
+     ultimos DIAS_RECIENTES dias y las fechas posteriores; --reconciliar compara todos.
+  2. Trae las lineas de los dias que no cuadran y deja esos dias en stg.factVentas_Periodos (el
+     extract de encabezados trae los encabezados de los mismos dias).
+Las lineas vigentes de [int] de un dia revisado que no vinieron ya no estan en el AS400 (la fecha
+es parte de la llave): silver las da de baja.
 
-FASE 1 (backfill completo, 2026-09-22): ya se hizo -- 1550710 filas, en
-lotes de 10000 (un solo fetchall()+executemany() sobre las 1.5M filas
-resulto en que el driver ODBC del AS400 (iSeries Access) muriera a mitad de
-la extraccion sin excepcion capturable; lotes mas chicos lo resuelven).
+Purga: el AS400 solo conserva ~4 meses de ventas (desde 2026-06-03 al 2026-10-05). Los dias que
+solo estan en [int] y son anteriores al horizonte (DIAS_HORIZONTE_BAJAS, el mismo default de silver)
+fueron purgados en el origen: no se comparan y se conservan vigentes en [int], que es la unica copia.
 
-FASE 2 (incremental, desde 2026-09-22): SIL no tiene columna de ultima
-modificacion propia, pero SI comparte encabezado con SIH via
-IHDPFX+IHDOCN+IHDYR+IHDTYP, y SIH.IHENDT (fecha de creacion del documento)
-es confiable. La extraccion incremental filtra por esa fecha con un JOIN al
-propio AS400 contra SIH (no se puede filtrar SIL solo, no tiene la columna).
-El watermark ("Ventas", compartido con extract_fact_ventas_encabezados.py)
-lo actualiza SOLO load_silver_fact_ventas.py tras un merge exitoso -- este
-script solo lo LEE.
+Llave: compania + prefijo + documento + anio + tipo + linea + fecha de factura (ILDATE). Sin la
+fecha se repite: facturas distintas que reusan el numero en otro dia.
 
-La estructura de stg.factVentasLineas se auto-provisiona a partir de la
-metadata real de las columnas en el AS400.
+Empresas excluidas (63, 65, 67, 69) por pedido del usuario (2026-09-22). Se extrae e inserta en
+lotes (fetchmany): el driver ODBC del AS400 puede morir a mitad de una extraccion grande sin
+excepcion capturable.
 
 Uso:
-    python db/etl/factVentas/extract_fact_ventas_lineas.py [--env-file .env]
+    python db/etl/factVentas/extract_fact_ventas_lineas.py [--env-file .env] [--reconciliar]
 """
 import argparse
 import datetime
@@ -41,25 +41,32 @@ from pathlib import Path
 
 import pyodbc
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import huella_as400  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import extract_fact_ventas_encabezados as enc  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_CACHE_DIR = Path(__file__).resolve().parent / "schema_cache"
 
 PROCESO = "Ventas_Lineas"
-PROCESO_WATERMARK = "Ventas"
-MARGEN_DIAS = 30
 AS400_ESQUEMA_ORIGEN = "PROLX835F"
 AS400_TABLA_ORIGEN = "SIL"
-AS400_TABLA_ENCABEZADO = "SIH"
 FILTRO_COLUMNA = "ILID"
 FILTRO_VALOR = "IL"
-FILTRO_COLUMNA_ENCABEZADO = "SIID"
-FILTRO_VALOR_ENCABEZADO = "IH"
+COLUMNA_PERIODO = "ILDATE"
 # Empresas excluidas del extract por pedido explicito del usuario (2026-09-22),
 # sin justificacion de negocio documentada aqui -- confirmar con el usuario
 # antes de tocar esta lista.
 EMPRESAS_EXCLUIDAS = (63, 65, 67, 69)
 STG_ESQUEMA = "stg"
 STG_TABLA = "factVentasLineas"
+STG_PERIODOS = enc.STG_PERIODOS
+INT_TABLA = "[int].factVentas"
+DIAS_RECIENTES = 45
+DIAS_HORIZONTE_BAJAS = 90
+TAMANO_LOTE = 10000
 
 COLUMNAS_DESEADAS = [
     "ILCOMP", "ILDPFX", "ILDOCN", "ILDYR", "ILDTYP", "ILLINE",
@@ -150,14 +157,6 @@ def finalizar_run(jrm_cur, run_id, estado, **kwargs):
     )
 
 
-def obtener_watermark(jrm_cur: pyodbc.Cursor) -> "datetime.date | None":
-    jrm_cur.execute("EXEC dbo.usp_Etl_WatermarkObtener @Proceso = ?", PROCESO_WATERMARK)
-    row = jrm_cur.fetchone()
-    if row is None or row[1] is None:
-        return None
-    return row[1].date() if hasattr(row[1], "date") else row[1]
-
-
 def registrar_error_fila(jrm_cur, run_id, llave_negocio, payload, mensaje_error):
     jrm_cur.execute(
         "EXEC dbo.usp_Etl_ErrorRegistrar @RunId = ?, @LlaveNegocio = ?, @Payload = ?, @MensajeError = ?",
@@ -167,32 +166,6 @@ def registrar_error_fila(jrm_cur, run_id, llave_negocio, payload, mensaje_error)
 
 # --- Introspección del origen y auto-provisión de stg -----------------------
 
-def mapear_tipo_sql_server(type_name: str, column_size: int, decimal_digits) -> str:
-    t = (type_name or "").upper()
-    if "CHAR" in t:
-        size = column_size if column_size and column_size > 0 else 255
-        return f"NVARCHAR({size})"
-    if "DECIMAL" in t or "NUMERIC" in t:
-        precision = column_size or 18
-        scale = decimal_digits or 0
-        return f"DECIMAL({precision},{scale})"
-    if t in ("INTEGER", "INT"):
-        return "INT"
-    if t == "SMALLINT":
-        return "SMALLINT"
-    if t == "BIGINT":
-        return "BIGINT"
-    if t == "DATE":
-        return "DATE"
-    if t == "TIME":
-        return "TIME"
-    if "TIMESTAMP" in t:
-        return "DATETIME2"
-    if "FLOAT" in t or "DOUBLE" in t or "REAL" in t:
-        return "FLOAT"
-    return "NVARCHAR(255)"
-
-
 def obtener_columnas_origen(as400_cur: pyodbc.Cursor) -> list:
     deseadas = {c.upper() for c in COLUMNAS_DESEADAS}
     encontradas = {}
@@ -200,7 +173,8 @@ def obtener_columnas_origen(as400_cur: pyodbc.Cursor) -> list:
         if row.column_name.upper() in deseadas:
             encontradas[row.column_name.upper()] = {
                 "nombre": row.column_name,
-                "tipo_sql_server": mapear_tipo_sql_server(row.type_name, row.column_size, row.decimal_digits),
+                "tipo_sql_server": enc.mapear_tipo_sql_server(row.type_name, row.column_size, row.decimal_digits),
+                "es_texto": huella_as400.es_tipo_texto(row.type_name),
             }
 
     faltantes = deseadas - encontradas.keys()
@@ -221,7 +195,7 @@ def _columnas_actuales_stg(jrm_cur: pyodbc.Cursor) -> set:
 
 
 def asegurar_tabla_stg(jrm_cur: pyodbc.Cursor, columnas: list) -> str:
-    esperadas = {c["nombre"].upper() for c in columnas} | {"FECHACARGASTG", "RUNID"}
+    esperadas = {c["nombre"].upper() for c in columnas} | {"HUELLA", "FECHACARGASTG", "RUNID"}
     actuales = _columnas_actuales_stg(jrm_cur)
 
     if actuales and actuales != esperadas:
@@ -236,6 +210,7 @@ def asegurar_tabla_stg(jrm_cur: pyodbc.Cursor, columnas: list) -> str:
 BEGIN
     CREATE TABLE {STG_ESQUEMA}.{STG_TABLA} (
     {cols_ddl},
+    [HUELLA] BIGINT NULL,
     [FechaCargaStg] DATETIME2(7) NOT NULL CONSTRAINT DF_{STG_TABLA}_FechaCargaStg DEFAULT (SYSDATETIME()),
     [RunId] INT NULL
     );
@@ -248,27 +223,57 @@ END
     return ddl
 
 
-# --- Extraccion / carga ------------------------------------------------------
+# --- Huella y comparacion por periodo ---------------------------------------
 
-TAMANO_LOTE = 10000
+def tablas_origen() -> str:
+    """SIL con su encabezado exacto (la huella de la linea incluye datos del encabezado)."""
+    sil = f"{AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN}"
+    sih = f"{enc.AS400_ESQUEMA_ORIGEN}.{enc.AS400_TABLA_ORIGEN}"
+    return (f'{sil} l JOIN {sih} h ON h."{enc.FILTRO_COLUMNA}" = \'{enc.FILTRO_VALOR}\' '
+            f'AND h."SICOMP" = l."ILCOMP" AND h."IHDPFX" = l."ILDPFX" AND h."IHDOCN" = l."ILDOCN" '
+            f'AND h."IHDYR" = l."ILDYR" AND h."IHDTYP" = l."ILDTYP" AND h."SIINVD" = l."ILDATE"')
 
 
-def ejecutar_consulta_origen(as400_cur: pyodbc.Cursor, columnas: list, desde_yyyymmdd: int) -> None:
-    # SIL no tiene columna de ultima modificacion propia -- se acota la
-    # ventana incremental via JOIN a SIH (encabezado) por IHENDT, la unica
-    # fecha de auditoria confiable del par de tablas.
-    nombres = ", ".join(f'l."{c["nombre"]}"' for c in columnas)
-    as400_cur.execute(
-        f'SELECT {nombres} '
-        f'FROM {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN} l '
-        f'JOIN {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ENCABEZADO} h '
-        f'  ON l."ILDPFX" = h."IHDPFX" AND l."ILDOCN" = h."IHDOCN" '
-        f' AND l."ILDYR" = h."IHDYR" AND l."ILDTYP" = h."IHDTYP" '
-        f'WHERE l."{FILTRO_COLUMNA}" = ? AND h."{FILTRO_COLUMNA_ENCABEZADO}" = ? AND h."IHENDT" >= ? '
-        f' AND l."ILCOMP" NOT IN ({", ".join(str(c) for c in EMPRESAS_EXCLUIDAS)})',
-        FILTRO_VALOR, FILTRO_VALOR_ENCABEZADO, desde_yyyymmdd,
-    )
+def filtro_origen() -> str:
+    excluidas = ", ".join(str(c) for c in EMPRESAS_EXCLUIDAS)
+    return f'l."{FILTRO_COLUMNA}" = \'{FILTRO_VALOR}\' AND l."ILCOMP" NOT IN ({excluidas})'
 
+
+def columnas_huella(columnas: list, columnas_enc: list) -> list:
+    """Columnas de la linea (alias l.) y luego los datos del encabezado (alias h.), en orden fijo."""
+    return ([{**c, "alias": "l."} for c in columnas]
+            + [{**c, "alias": "h."} for c in columnas_enc])
+
+
+def periodos_a_extraer(jrm_cur, as400_cur, expr: str, desde, horizonte: int) -> tuple:
+    """Compara por dia de factura el AS400 contra [int].
+
+    Devuelve (dias comparados, dias distintos a traer, dias purgados en el AS400 que se conservan).
+    """
+    filtro, params = filtro_origen(), []
+    filtro_local, params_local = "1 = 1", []
+    if desde is not None:
+        filtro += f' AND l."{COLUMNA_PERIODO}" >= ?'
+        params.append(desde)
+        filtro_local, params_local = "PeriodoOrigen >= ?", [desde]
+    origen = huella_as400.checksum_as400(as400_cur, tablas_origen(), COLUMNA_PERIODO, filtro, params, expr)
+    local = huella_as400.checksum_local(jrm_cur, INT_TABLA, "PeriodoOrigen", filtro_local, params_local)
+    distintos = huella_as400.periodos_distintos(origen, local)
+    purgados = [p for p in distintos if p not in origen and p < horizonte]
+    a_traer = [p for p in distintos if p not in purgados]
+    return len(origen.keys() | local.keys()), a_traer, purgados
+
+
+def registrar_periodos(jrm_conn, jrm_cur, periodos: list, run_id: int) -> None:
+    """Deja en stg los dias que el extract trae completos (silver solo da de baja en ellos)."""
+    jrm_cur.execute(f"TRUNCATE TABLE {STG_PERIODOS}")
+    if periodos:
+        jrm_cur.executemany(f"INSERT INTO {STG_PERIODOS} (Periodo, RunId) VALUES (?, ?)",
+                            [(p, run_id) for p in periodos])
+    jrm_conn.commit()
+
+
+# --- Extraccion / carga por lotes -------------------------------------------
 
 def cargar_lote(jrm_conn, jrm_cur, insert_sql: str, nombres_cols: list, llave_idx, lote: list, run_id: int) -> tuple:
     lote_con_run = [tuple(f) + (run_id,) for f in lote]
@@ -295,32 +300,31 @@ def cargar_lote(jrm_conn, jrm_cur, insert_sql: str, nombres_cols: list, llave_id
     return insertadas, rechazadas
 
 
-def extraer_y_cargar_por_lotes(jrm_conn, jrm_cur, as400_cur, columnas: list, run_id: int) -> tuple:
-    """
-    Trae filas del AS400 en lotes (fetchmany) y las inserta en stg en el
-    mismo tamaño de lote, en vez de un unico fetchall()+executemany() sobre
-    toda la tabla -- necesario dado el volumen de PROLX835F.SIL (~1.5M filas),
-    que con un solo lote gigante tarda demasiado y no da visibilidad de avance.
-    """
-    nombres_cols = [c["nombre"] for c in columnas]
-    llave_idx = nombres_cols.index("ILLINE") if "ILLINE" in nombres_cols else None
-
-    jrm_cur.execute(f"TRUNCATE TABLE {STG_ESQUEMA}.{STG_TABLA}")
-
+def extraer_y_cargar(jrm_conn, jrm_cur, as400_cur, columnas: list, expr: str, periodos: list, run_id: int) -> tuple:
+    """Lineas (con su huella) de los dias indicados, en lotes (fetchmany)."""
+    nombres_cols = [c["nombre"] for c in columnas] + ["HUELLA"]
+    llave_idx = nombres_cols.index("ILDOCN")
     col_list_sql = ", ".join(f"[{n}]" for n in nombres_cols) + ", [RunId]"
     placeholders = ", ".join(["?"] * (len(nombres_cols) + 1))
     insert_sql = f"INSERT INTO {STG_ESQUEMA}.{STG_TABLA} ({col_list_sql}) VALUES ({placeholders})"
 
+    # DB2 for i no soporta corchetes para identificadores -- se usan comillas dobles.
+    nombres = ", ".join(f'l."{c["nombre"]}"' for c in columnas)
+    base = f'SELECT {nombres}, {expr} AS "HUELLA" FROM {tablas_origen()} WHERE {filtro_origen()}'
+
     total_leidas = total_insertadas = total_rechazadas = 0
-    while True:
-        lote = as400_cur.fetchmany(TAMANO_LOTE)
-        if not lote:
-            break
-        total_leidas += len(lote)
-        insertadas, rechazadas = cargar_lote(jrm_conn, jrm_cur, insert_sql, nombres_cols, llave_idx, lote, run_id)
-        total_insertadas += insertadas
-        total_rechazadas += rechazadas
-        print(f"  Lote de {len(lote)} filas -> insertadas {insertadas} / rechazadas {rechazadas} (acumulado: {total_leidas})", flush=True)
+    for bloque in huella_as400.en_bloques(periodos):
+        marcas = ", ".join(["?"] * len(bloque))
+        as400_cur.execute(f'{base} AND l."{COLUMNA_PERIODO}" IN ({marcas})', *bloque)
+        while True:
+            lote = as400_cur.fetchmany(TAMANO_LOTE)
+            if not lote:
+                break
+            total_leidas += len(lote)
+            insertadas, rechazadas = cargar_lote(jrm_conn, jrm_cur, insert_sql, nombres_cols, llave_idx, lote, run_id)
+            total_insertadas += insertadas
+            total_rechazadas += rechazadas
+            print(f"  {total_leidas} lineas traidas", flush=True)
 
     return total_leidas, total_insertadas, total_rechazadas
 
@@ -328,10 +332,8 @@ def extraer_y_cargar_por_lotes(jrm_conn, jrm_cur, as400_cur, columnas: list, run
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
-    parser.add_argument(
-        "--reconciliar", action="store_true",
-        help="Ignora el watermark y extrae todo el historico (reconciliacion semanal).",
-    )
+    parser.add_argument("--reconciliar", action="store_true",
+                        help="Compara todos los dias de factura, no solo los recientes.")
     args = parser.parse_args()
 
     env = load_env(Path(args.env_file))
@@ -358,23 +360,30 @@ def main() -> int:
     try:
         as400_cur = as400_conn.cursor()
         columnas = obtener_columnas_origen(as400_cur)
-        print(f"Columnas detectadas en {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN}: {len(columnas)}")
+        columnas_enc = enc.obtener_columnas_origen(as400_cur, enc.COLUMNAS_DATOS)
+        print(f"Columnas detectadas en {AS400_ESQUEMA_ORIGEN}.{AS400_TABLA_ORIGEN}: {len(columnas)} "
+              f"(+ {len(columnas_enc)} del encabezado en la huella)")
+        expr = huella_as400.expresion_huella(columnas_huella(columnas, columnas_enc))
 
         asegurar_tabla_stg(jrm_cur, columnas)
+        jrm_cur.execute(f"TRUNCATE TABLE {STG_ESQUEMA}.{STG_TABLA}")
         jrm_conn.commit()
 
-        watermark = obtener_watermark(jrm_cur)
-        if args.reconciliar:
-            desde = datetime.date(1900, 1, 1)
-            print("Modo RECONCILIACION: se extrae todo el historico (se ignora el watermark).")
-        else:
-            desde = (watermark or datetime.date(1900, 1, 1)) - datetime.timedelta(days=MARGEN_DIAS)
-        desde_yyyymmdd = int(desde.strftime("%Y%m%d"))
-        print(f"Watermark actual ({PROCESO_WATERMARK}): {watermark} -> extrayendo desde {desde} (margen {MARGEN_DIAS}d)")
+        hoy = datetime.date.today()
+        desde = None
+        if not args.reconciliar:
+            desde = int((hoy - datetime.timedelta(days=DIAS_RECIENTES)).strftime("%Y%m%d"))
+        horizonte = int((hoy - datetime.timedelta(days=DIAS_HORIZONTE_BAJAS)).strftime("%Y%m%d"))
+        comparados, periodos, purgados = periodos_a_extraer(jrm_cur, as400_cur, expr, desde, horizonte)
+        alcance = "todos los dias" if desde is None else f"dias desde {desde}"
+        print(f"Comparacion ({alcance}): {comparados} dias, {len(periodos)} no cuadran")
+        if purgados:
+            print(f"Dias purgados en el AS400 (solo en [int], anteriores a {horizonte}; se conservan): "
+                  f"{len(purgados)} ({purgados[0]} a {purgados[-1]})")
+        registrar_periodos(jrm_conn, jrm_cur, periodos, run_id)
 
-        ejecutar_consulta_origen(as400_cur, columnas, desde_yyyymmdd)
-        filas_leidas, insertadas, rechazadas = extraer_y_cargar_por_lotes(
-            jrm_conn, jrm_cur, as400_cur, columnas, run_id
+        filas_leidas, insertadas, rechazadas = extraer_y_cargar(
+            jrm_conn, jrm_cur, as400_cur, columnas, expr, periodos, run_id
         )
         print(f"Total leidas: {filas_leidas} / Insertadas: {insertadas} / Rechazadas: {rechazadas}")
 

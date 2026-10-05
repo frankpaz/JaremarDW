@@ -1,7 +1,12 @@
 """
 Orquestador de ventas: actualiza dimProducto, corre el hecho de ventas
-(extract encabezados -> extract lineas -> silver -> gold) y luego el monitor de alertas,
+(extract lineas -> extract encabezados -> silver -> gold) y luego el monitor de alertas,
 acotado a los dominios Ventas y Producto.
+
+El hecho es incremental por huella (migraciones 253-255): el extract de lineas compara por dia
+de factura contra el AS400 y solo se traen los dias que no cuadran. La corrida normal compara
+los ultimos 45 dias; con --reconciliar compara todos los que guarda el AS400 (~4 meses: el ERP
+purga lo anterior, que queda vigente en el warehouse) y gold recorre todo [int].
 
 dimProducto va primero para que gold resuelva ProductoKey con datos frescos. dimEmpresas no
 se corre aqui (cambia poco; la actualizan guias, manifiestos y run_dimensiones.py).
@@ -9,8 +14,8 @@ Si la dimension falla, ventas corre igual (las llaves que queden NULL se rellena
 reconciliacion). La logica comun esta en hecho_programado.py.
 
 Uso:
-    python db/scheduler/run_ventas.py --env-file .env.prod                # diaria (incremental, ventana de 30 dias)
-    python db/scheduler/run_ventas.py --env-file .env.prod --reconciliar  # semanal: todo el historico
+    python db/scheduler/run_ventas.py --env-file .env.prod                # dias recientes (05:00 y 13:00)
+    python db/scheduler/run_ventas.py --env-file .env.prod --reconciliar  # todos los dias (diaria 02:00)
     python db/scheduler/run_ventas.py --env-file .env.prod --solo ventas  # sin actualizar dimensiones
     python db/scheduler/run_ventas.py --dry-run
 
@@ -27,7 +32,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hecho_programado  # noqa: E402
 
-# Un extract completo de lineas tarda ~25 min (1,56 M filas); la reconciliacion necesita mas margen.
+# La primera corrida por huella vuelve a traer todo lo que guarda el AS400 (~1,33 M lineas, ~25 min);
+# despues, la completa solo trae los dias que no cuadran.
 TIMEOUT_PASO_DEFECTO = 1800
 TIMEOUT_PASO_RECONCILIAR = 3600
 

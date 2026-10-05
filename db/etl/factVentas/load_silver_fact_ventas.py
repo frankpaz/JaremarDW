@@ -1,19 +1,23 @@
 """
 Silver: stg.factVentasLineas + stg.factVentasEncabezados -> [int].factVentas
-(tipado, join lineas+encabezado, dedup por llave compuesta).
+(tipado, join lineas+encabezado, dedup por llave compuesta, MERGE por huella).
 
 Todo ocurre dentro de JAREMAR -- el trabajo real lo hace
-[int].usp_MergeFactVentas; este script solo orquesta el ciclo de control
-(registro de proceso, log de corrida, watermark).
+[int].usp_MergeFactVentas (migracion 254); este script solo orquesta el ciclo
+de control (registro de proceso, log de corrida, watermark).
 
-FASE 2 (incremental, desde 2026-09-22): este es el UNICO paso que mueve el
-watermark compartido "Ventas" (los dos extract solo lo leen) -- se hace
-despues de un merge exitoso, tomando MAX(IHENDT) real de [int].factVentas
-en vez de datetime.now(), porque [int] es aditivo (nunca se borra nada en
-la Fase 2) y su maximo solo puede crecer con el tiempo.
+stg solo trae los dias de factura que no cuadraron con el AS400 (ver los
+extracts). Silver inserta y actualiza lineas, y da de baja (EsVigente = 0,
+nunca borra) lo que ya no esta en el AS400 dentro de los dias revisados, salvo
+en dias anteriores al horizonte de purga (--dias-horizonte, default 90): el
+AS400 purga las ventas de mas de ~4 meses y [int] conserva esa historia. Si
+daria de baja mas de --max-bajas lineas, aborta sin tocar nada.
+
+Sigue moviendo el watermark "Ventas" con MAX(ILDATE) de [int] como referencia
+de frescura; los extracts ya no lo usan para acotar lo que traen.
 
 Uso:
-    python db/etl/factVentas/load_silver_fact_ventas.py [--env-file .env]
+    python db/etl/factVentas/load_silver_fact_ventas.py [--env-file .env] [--max-bajas N] [--dias-horizonte N]
 """
 import argparse
 import datetime
@@ -24,6 +28,8 @@ import pyodbc
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 PROCESO = "Ventas_Silver"
+MAX_BAJAS = 200
+DIAS_HORIZONTE = 90
 
 
 def load_env(path: Path) -> dict:
@@ -84,12 +90,11 @@ def finalizar_run(cur, run_id, estado, **kwargs):
 
 
 def verificar_extracts_completos(cur: pyodbc.Cursor, extracts: list) -> None:
-    """Aborta si los extracts (encabezados + lineas) no estan completos y frescos.
+    """Aborta si los extracts (lineas + encabezados) no estan completos y frescos.
 
-    Ambos extracts deben usar la misma ventana (el mismo watermark) porque el
-    merge Silver cruza lineas con encabezados; si uno fallo a medias o no se
-    corrio desde el ultimo Silver exitoso, mezclar y avanzar el watermark
-    dejaria datos perdidos o encabezados NULL en las lineas.
+    Silver da de baja lo que falte en los dias que trajeron los extracts y cruza
+    lineas con encabezados: con un stg incompleto o viejo marcaria como no
+    vigentes filas buenas o dejaria encabezados NULL en las lineas.
     """
     cur.execute(
         """
@@ -124,6 +129,10 @@ def verificar_extracts_completos(cur: pyodbc.Cursor, extracts: list) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
+    parser.add_argument("--max-bajas", type=int, default=MAX_BAJAS,
+                        help=f"Maximo de lineas que una corrida puede dar de baja (default {MAX_BAJAS}).")
+    parser.add_argument("--dias-horizonte", type=int, default=DIAS_HORIZONTE,
+                        help=f"No da de baja en dias de factura anteriores a hoy menos N dias (default {DIAS_HORIZONTE}).")
     args = parser.parse_args()
 
     env = load_env(Path(args.env_file))
@@ -141,21 +150,27 @@ def main() -> int:
     print(f"RunId: {run_id}")
 
     try:
-        verificar_extracts_completos(cur, ["Ventas_Encabezados", "Ventas_Lineas"])
-        cur.execute("EXEC [int].usp_MergeFactVentas @RunId = ?", run_id)
-        filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas = cur.fetchone()
+        verificar_extracts_completos(cur, ["Ventas_Lineas", "Ventas_Encabezados"])
+        cur.execute("EXEC [int].usp_MergeFactVentas @RunId = ?, @MaxBajas = ?, @DiasHorizonteBajas = ?",
+                    run_id, args.max_bajas, args.dias_horizonte)
+        (filas_leidas, filas_insertadas, filas_actualizadas, filas_ignoradas,
+         filas_bajas, sin_encabezado) = cur.fetchone()
         print(
             f"Leidas: {filas_leidas} / Insertadas: {filas_insertadas} / "
-            f"Actualizadas: {filas_actualizadas} / Sin cambio: {filas_ignoradas}"
+            f"Actualizadas: {filas_actualizadas} / Sin cambio: {filas_ignoradas} / "
+            f"Dadas de baja: {filas_bajas}"
         )
+        if sin_encabezado:
+            print(f"AVISO: {sin_encabezado} lineas sin su encabezado en stg; se cargan sin datos de encabezado "
+                  f"y su dia se vuelve a traer en la corrida siguiente.")
 
         finalizar_run(
-            cur, run_id, "EXITO",
+            cur, run_id, "EXITO" if not sin_encabezado else "ADVERTENCIA",
             filas_leidas=filas_leidas, filas_insertadas=filas_insertadas,
             filas_actualizadas=filas_actualizadas, filas_ignoradas=filas_ignoradas,
         )
 
-        cur.execute("SELECT MAX(IHENDT) FROM [int].factVentas")
+        cur.execute("SELECT MAX(ILDATE) FROM [int].factVentas WHERE EsVigente = 1 AND ILDATE <= CAST(GETDATE() AS DATE)")
         nuevo_max = cur.fetchone()[0]
         if nuevo_max is not None:
             nueva_fecha_hora = datetime.datetime.combine(nuevo_max, datetime.time())

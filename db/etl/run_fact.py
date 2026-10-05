@@ -5,7 +5,7 @@ Corre los pasos en orden y se detiene en el primero que falle (los silver ya
 verifican por su cuenta que los extracts esten completos y frescos).
 
 Uso:
-    python db/etl/run_fact.py ventas   [--env-file .env.prod]     # diario (incremental, ventana de 30 dias)
+    python db/etl/run_fact.py ventas   [--env-file .env.prod]     # por huella: trae solo los dias de factura que no cuadran
     python db/etl/run_fact.py compras  [--env-file .env.prod]
     python db/etl/run_fact.py envios   [--env-file .env.prod]     # por huella: trae solo los dias que no cuadran (--reconciliar compara todos)
     python db/etl/run_fact.py guias    [--env-file .env.prod]     # guias de remision: ventana de 30 dias por fecha de registro
@@ -13,7 +13,7 @@ Uso:
     python db/etl/run_fact.py bascula  [--env-file .env.prod]     # boletas de bascula (BASMASTNN): ventana de 30 dias + abiertas, MERGE
     python db/etl/run_fact.py sanalejo_fruta [--env-file .env.prod]  # dominio SanAlejo (tambien sanalejo_despachos / sanalejo_ingresos)
 
-    python db/etl/run_fact.py ventas --reconciliar                # semanal: extrae todo el historico, gold recorre todo [int]
+    python db/etl/run_fact.py ventas --reconciliar                # compara todos los dias que guarda el AS400, gold recorre todo [int]
 """
 import argparse
 import subprocess
@@ -24,9 +24,11 @@ ETL = Path(__file__).resolve().parent
 
 # (script, acepta --reconciliar)
 FLUJOS = {
+    # Por huella (migraciones 253-255): las lineas deciden los dias de factura que no cuadran (la huella
+    # incluye el encabezado) y despues se traen los encabezados de esos dias; --reconciliar = todos los dias.
     "ventas": [
-        ("factVentas/extract_fact_ventas_encabezados.py", True),
         ("factVentas/extract_fact_ventas_lineas.py", True),
+        ("factVentas/extract_fact_ventas_encabezados.py", True),
         ("factVentas/load_silver_fact_ventas.py", False),
         ("factVentas/load_gold_fact_ventas.py", True),
     ],
