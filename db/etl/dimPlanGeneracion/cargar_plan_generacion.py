@@ -19,7 +19,8 @@ Valida antes de escribir (cabeceras, Mes 1-12, valores numericos >= 0, sin
 inversor-mes duplicado); si hay errores no se escribe nada. Avisa, sin bloquear:
   * inversores con plan 0 aunque su planta tiene plan (capacidad faltante en el archivo);
   * plantas cuyos inversores suman menos que el plan de la planta;
-  * inversores que no existen en la dimension de su fabricante (solo revision: no se guardan llaves).
+  * inversores (columna Inversor = id del equipo en su portal) que no existen en los portales o que no estan
+    en el informe segun el catalogo de plantas: su plan no se reportaria (solo revision: no se guardan llaves).
 
 Cada carga entra con una --version y queda en el historial: para cada fecha y dispositivo
 queda vigente la version cargada mas recientemente; las fechas que la nueva carga no trae
@@ -184,24 +185,25 @@ def expandir_dias(filas: list, anio: int) -> list:
 
 
 def avisar_dispositivos(cur, filas: list, avisos: list) -> None:
-    """Revision (no se guardan llaves): inversores que no existen en la dimension de su fabricante."""
-    consultas = {
-        "sma": "SELECT CAST(DeviceId AS NVARCHAR(50)) FROM dw.dimSmaDevices",
-        "huawei": "SELECT CAST(DeviceId AS NVARCHAR(50)) FROM dw.dimHuaweiDevices",
-        "soliscloud": "SELECT DeviceSn FROM dw.dimSoliscloudDevices",
-        "growatt": "SELECT JoinKey FROM dw.dimDeviceCapacity WHERE JoinKey IS NOT NULL",
-    }
+    """Revision (no se guardan llaves). Inversor = id del equipo en su portal (dw.vwSolarEquipo.DeviceKey):
+    avisa los que no existen en los portales y los que no cruzan con el informe (dw.vwRptInversor), cuyo plan
+    no se reportaria (desde la 260 el informe cruza el plan por Proveedor + Inversor)."""
     try:
-        conocidos = {}
-        for prov, sql in consultas.items():
-            cur.execute(sql)
-            conocidos[prov] = {str(r[0]).strip() for r in cur.fetchall() if r[0] is not None}
+        cur.execute("SELECT Proveedor, DeviceKey FROM dw.vwSolarEquipo")
+        en_portal = {(str(p), str(k).strip()) for p, k in cur.fetchall()}
+        cur.execute("SELECT Proveedor, DeviceKey FROM dw.vwRptInversor")
+        en_informe = {(str(p), str(k).strip()) for p, k in cur.fetchall()}
     except Exception:
-        avisos.append("No se pudieron leer las dimensiones de dispositivos; se omite la revision.")
+        avisos.append("No se pudieron leer los equipos de los portales (dw.vwSolarEquipo); se omite la revision.")
         return
-    sin = sorted({(f["Proveedor"], f["InversorId"]) for f in filas if f["Inversor"] not in conocidos.get(f["Proveedor"], set())})
+    claves = {(f["Proveedor"], f["Inversor"]): f["InversorId"] for f in filas}
+    sin = sorted((p, n) for (p, k), n in claves.items() if (p, k) not in en_portal)
     if sin:
-        avisos.append(f"{len(sin)} inversor(es) que no existen en la dimension de su fabricante: {sin}.")
+        avisos.append(f"{len(sin)} inversor(es) que no existen en los portales: {sin}.")
+    fuera = sorted((p, n) for (p, k), n in claves.items() if (p, k) in en_portal and (p, k) not in en_informe)
+    if fuera:
+        avisos.append(f"{len(fuera)} inversor(es) que existen pero no estan en el informe (revisar el catalogo de plantas); "
+                      f"su plan no se reporta: {fuera}.")
 
 
 # --- Carga (framework de control ETL) -----------------------------------------

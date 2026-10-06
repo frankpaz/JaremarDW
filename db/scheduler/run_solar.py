@@ -17,7 +17,7 @@ Codigos de salida:
 
 Cada corrida escribe logs/run_solar_AAAAMMDD_HHMMSS.log (se conservan 30 dias) y usa
 logs/run_solar.lock para no solaparse. Las alertas salen por los canales ALERT_* del .env
-(ver db/monitor_etl.py). Las cargas de dimPlanGeneracion, geografia y AS400 NO forman parte de esta corrida.
+(ver db/monitor_etl.py), con --alertas-solar (catalogo de plantas e inversores sin datos). Las cargas de dimPlanGeneracion, geografia y AS400 NO forman parte de esta corrida.
 """
 import argparse
 import datetime
@@ -191,7 +191,7 @@ def imprimir_resumen(resultados: list, log: Registro) -> None:
 
 def correr_monitor(env_file: str, log: Registro) -> int:
     cmd = [sys.executable, str(MONITOR), "--procesos", *PREFIJOS_MONITOR, "--horas-sin-exito", str(HORAS_SIN_EXITO),
-           "--sin-repetir-horas", str(SIN_REPETIR_HORAS)]
+           "--sin-repetir-horas", str(SIN_REPETIR_HORAS), "--alertas-solar"]   # + datos: catalogo y frescura por inversor
     if env_file:
         cmd += ["--env-file", env_file]
     log("\n##### Monitor de alertas (solo procesos solares) #####")

@@ -16,6 +16,10 @@ Uso:
     # Solo los procesos de ciertos dominios (columna dbo.EtlProcess.Dominio, sin depender del nombre):
     python db/monitor_etl.py --env-file .env.prod --dominios Ventas Producto --horas-sin-exito 26
 
+    # Ademas revisa los DATOS del dominio Solar (dw.usp_SolarAlertasObtener: estaciones sin planta en el catalogo,
+    # inversores sin datos hace mas de N dias, sin capacidad, serie repetida, plan que no cruza):
+    python db/monitor_etl.py --env-file .env.prod --procesos Sma Huawei --alertas-solar --dias-sin-datos 2
+
     # Comprobar que el canal de notificacion esta bien configurado (envia un mensaje de prueba y sale):
     python db/monitor_etl.py --env-file .env.prod --probar-notificacion
 
@@ -56,13 +60,17 @@ def obtener_alertas(env: dict, args) -> list:
                 *args.dominios,
             )
             del_dominio = {str(r[0]).lower() for r in cur.fetchall()}
+        solares = []
+        if args.alertas_solar:
+            cur.execute("EXEC dw.usp_SolarAlertasObtener @DiasSinDatos = ?", args.dias_sin_datos)
+            solares = [tuple(r) for r in cur.fetchall()]
     finally:
         cnxn.close()
     if args.procesos or args.dominios:
         prefijos = tuple(p.lower() for p in (args.procesos or []))
         alertas = [a for a in alertas
                    if str(a[2]).lower() in del_dominio or (prefijos and str(a[2]).lower().startswith(prefijos))]
-    return alertas
+    return alertas + solares
 
 
 def armar_reporte(alertas: list, env: dict, procesos: list = None, dominios: list = None) -> str:
@@ -189,6 +197,10 @@ def main() -> int:
     parser.add_argument("--dominios", nargs="+", default=None, metavar="DOMINIO",
                         help="Solo considera los procesos de estos dominios (dbo.EtlProcess.Dominio, ej. Ventas Producto). "
                              "Con --procesos, vale lo que cumpla cualquiera de los dos.")
+    parser.add_argument("--alertas-solar", action="store_true",
+                        help="Agrega las alertas de datos del dominio Solar (dw.usp_SolarAlertasObtener).")
+    parser.add_argument("--dias-sin-datos", type=int, default=2,
+                        help="Con --alertas-solar: inversor sin generacion en mas de N dias (default 2).")
     parser.add_argument("--sin-repetir-horas", type=int, default=0,
                         help="No vuelve a notificar el mismo conjunto de alertas dentro de N horas (0 = siempre notifica).")
     parser.add_argument("--estado", default=str(ESTADO_DEFECTO), help="Archivo donde se recuerda el ultimo aviso (default logs/monitor_estado.json).")
