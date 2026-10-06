@@ -68,6 +68,8 @@ Las horas de Solar caen 30-60 min despues de cada lote que deposita el proceso e
 
 Codigos de salida de `run_solar.py`: `0` ok, `1` un paso fallo, `2` ya habia otra corrida (bloqueo `logs/run_solar.lock`, vence a las 2 h), `3` pasos ok pero el monitor hallo alertas criticas. Log por corrida: `logs/run_solar_AAAAMMDD_HHMMSS.log` (30 dias).
 
+**Correo de Solar** (`db/reporte_solar.py`, lo envia `run_solar.py`; el monitor de la corrida solo escribe en el log): un reporte diario en la primera corrida desde las 10:00 (`--hora-reporte`), aunque todo este bien, y uno inmediato en cualquier corrida con pasos fallidos. Lleva el estado de la corrida con el detalle de los errores (ultimas lineas de cada paso fallido y `dbo.EtlRunLog`), la tabla de inversores con 2 o mas dias seguidos sin produccion (sin dato o 0 kWh, hasta ayer; `dw.usp_SolarInversoresSinProduccion`) y las demas alertas. Vista previa sin enviar: `python db/reporte_solar.py --env-file .env.prod --vista-previa logs/reporte_solar.html`; prueba de envio: `--enviar`. El vigilante sigue avisando por su cuenta si la corrida no se ejecuta.
+
 ## Requisitos del equipo
 
 - Python 3 con `pyodbc`; ODBC Driver 17 (o superior) para SQL Server.

@@ -16,8 +16,10 @@ Codigos de salida:
     3  pasos correctos pero el monitor detecto alertas criticas
 
 Cada corrida escribe logs/run_solar_AAAAMMDD_HHMMSS.log (se conservan 30 dias) y usa
-logs/run_solar.lock para no solaparse. Las alertas salen por los canales ALERT_* del .env
-(ver db/monitor_etl.py), con --alertas-solar (catalogo de plantas e inversores sin datos). Las cargas de dimPlanGeneracion, geografia y AS400 NO forman parte de esta corrida.
+logs/run_solar.lock para no solaparse. El monitor (con --alertas-solar) solo deja su reporte en el log
+y define el codigo de salida; el correo lo envia db/reporte_solar.py por los canales ALERT_* del .env:
+el reporte diario en la primera corrida desde --hora-reporte (default 10) y uno inmediato en cualquier
+corrida con pasos fallidos. Las cargas de dimPlanGeneracion, geografia y AS400 NO forman parte de esta corrida.
 """
 import argparse
 import datetime
@@ -36,7 +38,6 @@ RETENCION_DIAS = 30
 BLOQUEO_VENCE_HORAS = 2
 TIMEOUT_PASO_DEFECTO = 900
 HORAS_SIN_EXITO = 16
-SIN_REPETIR_HORAS = 12
 
 # Prefijos de los procesos solares en dbo.EtlProcess (para acotar el monitor).
 PREFIJOS_MONITOR = ["Sma", "Huawei", "Soliscloud", "Growatt", "Meteo", "DeviceCapacity", "GhiPlan", "GsaMonthly"]
@@ -165,7 +166,8 @@ def correr(grupos: list, env_file: str, log: Registro, timeout_paso: int = TIMEO
             cmd = [sys.executable, str(script)] + (["--env-file", env_file] if env_file else []) + extra
             rc, salida, seg = ejecutor(cmd, timeout_paso)
             estado = "OK" if rc == 0 else "FALLO"
-            resultados.append({"grupo": grupo, "paso": etiqueta, "estado": estado, "rc": rc, "seg": seg})
+            resultados.append({"grupo": grupo, "paso": etiqueta, "estado": estado, "rc": rc, "seg": seg,
+                               "salida": "\n".join(salida.strip().splitlines()[-40:])})
             log(f"--- {etiqueta}: {estado} (rc={rc}, {seg:.0f}s)")
             for linea in salida.strip().splitlines()[-6:]:
                 log(f"      {linea}")
@@ -191,7 +193,7 @@ def imprimir_resumen(resultados: list, log: Registro) -> None:
 
 def correr_monitor(env_file: str, log: Registro) -> int:
     cmd = [sys.executable, str(MONITOR), "--procesos", *PREFIJOS_MONITOR, "--horas-sin-exito", str(HORAS_SIN_EXITO),
-           "--sin-repetir-horas", str(SIN_REPETIR_HORAS), "--alertas-solar"]   # + datos: catalogo y frescura por inversor
+           "--alertas-solar", "--sin-notificar"]   # el correo lo envia reporte_solar.py
     if env_file:
         cmd += ["--env-file", env_file]
     log("\n##### Monitor de alertas (solo procesos solares) #####")
@@ -202,19 +204,19 @@ def correr_monitor(env_file: str, log: Registro) -> int:
     return rc
 
 
-def avisar_directo(env_file: str, resultados: list, log: Registro) -> None:
-    """Respaldo: si el monitor no pudo evaluar (ej. base inaccesible) y hubo pasos fallidos, avisa desde aqui."""
+def enviar_reporte(env_file: str, resultados: list, inicio: datetime.datetime, hora_reporte: int, log: Registro) -> None:
+    """Correo del dominio (db/reporte_solar.py): diario y, si hubo pasos fallidos, inmediato. Si la base no
+    responde, el correo sale igual con los pasos fallidos."""
+    log("\n##### Reporte por correo #####")
     try:
         sys.path.insert(0, str(ROOT / "db"))
-        from monitor_etl import notificar  # noqa: E402
         from migrate import load_env  # noqa: E402
-        env = load_env(Path(env_file))
-        malos = [f"{r['grupo']}/{r['paso']}" for r in resultados if r["estado"] == "FALLO"]
-        texto = ("Corrida del dominio Solar con pasos fallidos y el monitor no pudo evaluar la base "
-                 f"({env.get('JAREMAR_SERVER', '?')}). Pasos: {malos}. Revisar logs/ en el equipo que ejecuta la tarea.")
-        notificar(env, "[ETL JAREMAR] CRITICO: fallo del dominio Solar", texto)
+        from reporte_solar import reportar_corrida  # noqa: E402
+        env = load_env(Path(env_file) if env_file else ROOT / ".env")
+        reportar_corrida(env, resultados, inicio, PREFIJOS_MONITOR, log=log, hora_reporte=hora_reporte,
+                         horas_sin_exito=HORAS_SIN_EXITO, ruta_log=str(log.ruta) if log.ruta else None)
     except Exception as exc:
-        log(f"No se pudo enviar el aviso directo: {exc}")
+        log(f"No se pudo enviar el reporte: {exc}")
 
 
 def main() -> int:
@@ -226,6 +228,9 @@ def main() -> int:
     parser.add_argument("--timeout-paso", type=int, default=TIMEOUT_PASO_DEFECTO, help="Segundos maximos por paso (default 900).")
     parser.add_argument("--log-dir", default=str(LOG_DIR_DEFECTO), help="Carpeta de registros y bloqueo (default <repo>/logs).")
     parser.add_argument("--sin-monitor", action="store_true", help="No corre el monitor de alertas al final.")
+    parser.add_argument("--sin-reporte", action="store_true", help="No envia el reporte por correo.")
+    parser.add_argument("--hora-reporte", type=int, default=10,
+                        help="El reporte diario sale en la primera corrida desde esta hora (default 10).")
     args = parser.parse_args()
 
     grupos = args.solo or list(GRUPOS)
@@ -263,8 +268,8 @@ def main() -> int:
         rc_monitor = None
         if not args.sin_monitor:
             rc_monitor = correr_monitor(args.env_file, log)
-            if hubo_fallo and rc_monitor not in (0, 1):
-                avisar_directo(args.env_file, resultados, log)
+        if not args.sin_reporte:
+            enviar_reporte(args.env_file, resultados, inicio, args.hora_reporte, log)
 
         log(f"\nCorrida terminada {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ({(datetime.datetime.now() - inicio).total_seconds():.0f}s)")
         if hubo_fallo:

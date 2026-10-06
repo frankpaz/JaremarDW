@@ -96,12 +96,14 @@ def notificar_webhook(url: str, reporte: str) -> None:
     urllib.request.urlopen(req, timeout=15).read()
 
 
-def notificar_correo(env: dict, asunto: str, reporte: str) -> None:
+def notificar_correo(env: dict, asunto: str, reporte: str, html: str = None) -> None:
     msg = EmailMessage()
     msg["Subject"] = asunto
     msg["From"] = env["ALERT_EMAIL_FROM"]
     msg["To"] = env["ALERT_EMAIL_TO"]
     msg.set_content(reporte)
+    if html:
+        msg.add_alternative(html, subtype="html")
     with smtplib.SMTP(env["ALERT_SMTP_HOST"], int(env.get("ALERT_SMTP_PORT", "587")), timeout=20) as smtp:
         if env.get("ALERT_SMTP_TLS", "1") != "0":
             smtp.starttls()
@@ -117,8 +119,9 @@ def canales_configurados(env: dict) -> dict:
     }
 
 
-def notificar(env: dict, asunto: str, reporte: str) -> int:
-    """Envia por los canales configurados. Devuelve cuantos canales fallaron."""
+def notificar(env: dict, asunto: str, reporte: str, html: str = None) -> int:
+    """Envia por los canales configurados (el webhook recibe el texto; el correo, ademas, el HTML si hay).
+    Devuelve cuantos canales fallaron."""
     fallos = 0
     canales = canales_configurados(env)
     if canales["webhook"]:
@@ -130,7 +133,7 @@ def notificar(env: dict, asunto: str, reporte: str) -> int:
             print(f"No se pudo notificar por webhook: {exc}", file=sys.stderr)
     if canales["correo"]:
         try:
-            notificar_correo(env, asunto, reporte)
+            notificar_correo(env, asunto, reporte, html)
             print("Notificado por correo.")
         except Exception as exc:
             fallos += 1
@@ -204,6 +207,8 @@ def main() -> int:
     parser.add_argument("--sin-repetir-horas", type=int, default=0,
                         help="No vuelve a notificar el mismo conjunto de alertas dentro de N horas (0 = siempre notifica).")
     parser.add_argument("--estado", default=str(ESTADO_DEFECTO), help="Archivo donde se recuerda el ultimo aviso (default logs/monitor_estado.json).")
+    parser.add_argument("--sin-notificar", action="store_true",
+                        help="Solo imprime el reporte y devuelve el codigo de salida; no notifica (run_solar.py envia su propio reporte).")
     parser.add_argument("--probar-notificacion", action="store_true",
                         help="Envia un mensaje de prueba por los canales configurados y sale.")
     args = parser.parse_args()
@@ -234,7 +239,9 @@ def main() -> int:
     hay_criticas = any(a[0] == "CRITICA" for a in alertas)
     asunto = f"[ETL JAREMAR] {'CRITICO' if hay_criticas else 'Advertencia'}: {len(alertas)} alerta(s)"
 
-    if debe_notificar(args, alertas):
+    if args.sin_notificar:
+        pass
+    elif debe_notificar(args, alertas):
         notificar(env, asunto, reporte)
     else:
         print(f"Mismas alertas ya notificadas hace menos de {args.sin_repetir_horas} h; no se reenvia.")
