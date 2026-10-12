@@ -1,6 +1,6 @@
 """
 Orquestador de manifiestos (PROLXUSRF.UNDIS002): actualiza las dimensiones que resuelve el gold
-(dimEmpresas, dimAlmacen, dimCliente, dimProducto, dimRuta), corre el hecho factManifiestos
+(dimEmpresas, dimAlmacen, dimUbicacion, dimCliente, dimProducto, dimRuta), corre el hecho factManifiestos
 (extract -> silver -> gold, reemplazo por ventana de 30 dias de la fecha de la orden)
 y luego el monitor de alertas.
 
@@ -30,10 +30,10 @@ TIMEOUT_PASO_DEFECTO = 1800
 # Todo 2026 son ~2,7 M filas al 2026-09 (~32 min de extract en prod) y crece ~3,4 M filas/anio.
 TIMEOUT_PASO_RECONCILIAR = 3600
 
-DIMENSIONES = ["empresas", "almacen", "cliente", "producto", "ruta"]
+DIMENSIONES = ["empresas", "almacen", "ubicacion", "cliente", "producto", "ruta"]
 
 # Prefijos de sus procesos en dbo.EtlProcess (para acotar el monitor).
-PREFIJOS_MONITOR = ["Manifiestos", "Empresas", "EmpresaMoneda", "Almacen", "Cliente", "Producto", "Ruta"]
+PREFIJOS_MONITOR = ["Manifiestos", "Empresas", "EmpresaMoneda", "Almacen", "Ubicacion", "Cliente", "Producto", "Ruta"]
 
 
 if __name__ == "__main__":

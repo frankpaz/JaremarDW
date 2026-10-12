@@ -49,6 +49,9 @@ GRUPOS = {
     # Resuelve EmpresaKey/PaisKey en gold y dimCliente resuelve AlmacenKey con ella: va despues de
     # empresas y antes de cliente (dimPais es de referencia y casi no cambia).
     "almacen": ("dimAlmacen", ["extract_dim_almacen.py", "load_silver_dim_almacen.py", "load_gold_dim_almacen.py"]),
+    # Resuelve AlmacenKey en gold: va despues de almacen.
+    "ubicacion": ("dimUbicacion", ["extract_dim_ubicacion.py", "load_silver_dim_ubicacion.py",
+                                   "load_gold_dim_ubicacion.py"]),
     "cliente": ("dimCliente", ["extract_dim_cliente.py", "load_silver_dim_cliente.py", "load_gold_dim_cliente.py"]),
     "proveedor": ("dimProveedor", ["extract_dim_proveedor.py", "load_silver_dim_proveedor.py", "load_gold_dim_proveedor.py"]),
     "terminosventa": ("dimTerminosVenta", ["extract_dim_terminos_venta.py", "load_silver_dim_terminos_venta.py",
@@ -93,7 +96,7 @@ GRUPOS = {
 # Prefijos de sus procesos en dbo.EtlProcess (para acotar el monitor).
 PREFIJOS_MONITOR = ["Sector", "CentroCosto", "Cuenta", "SubCuenta", "Empresas", "EmpresaMoneda", "ClasesProducto",
                     "Producto", "Cliente", "Proveedor", "TerminosVenta", "TerminosCompra", "Ruta", "Viaje", "Pais",
-                    "DimDepartamento", "DimMunicipio", "Vehiculo", "Almacen", "MotivoTraslado",
+                    "DimDepartamento", "DimMunicipio", "Vehiculo", "Almacen", "Ubicacion", "MotivoTraslado",
                     "Basculas", "TipoBoleta", "LugarBascula", "ProductoBascula",
                     "SanAlejoProducto", "SanAlejoLocalizacion", "SanAlejoTransportista", "SanAlejoCliente",
                     "SanAlejoProductor", "SanAlejoFinca"]
