@@ -46,6 +46,9 @@ GRUPOS = {
     "clasesproducto": ("dimClasesProducto", ["extract_dim_clases_producto.py", "load_silver_dim_clases_producto.py",
                                              "load_gold_dim_clases_producto.py"]),
     "producto": ("dimProducto", ["extract_dim_producto.py", "load_silver_dim_producto.py", "load_gold_dim_producto.py"]),
+    # Resuelve EmpresaKey/PaisKey en gold y dimCliente resuelve AlmacenKey con ella: va despues de
+    # empresas y antes de cliente (dimPais es de referencia y casi no cambia).
+    "almacen": ("dimAlmacen", ["extract_dim_almacen.py", "load_silver_dim_almacen.py", "load_gold_dim_almacen.py"]),
     "cliente": ("dimCliente", ["extract_dim_cliente.py", "load_silver_dim_cliente.py", "load_gold_dim_cliente.py"]),
     "proveedor": ("dimProveedor", ["extract_dim_proveedor.py", "load_silver_dim_proveedor.py", "load_gold_dim_proveedor.py"]),
     "terminosventa": ("dimTerminosVenta", ["extract_dim_terminos_venta.py", "load_silver_dim_terminos_venta.py",
@@ -59,8 +62,6 @@ GRUPOS = {
                          "../dimGeografia/load_dim_geografia.py"]),
     # Resuelve ProveedorKey/PaisKey en gold: va despues de proveedor y pais.
     "vehiculo": ("dimVehiculo", ["extract_dim_vehiculo.py", "load_silver_dim_vehiculo.py", "load_gold_dim_vehiculo.py"]),
-    # Resuelve EmpresaKey/PaisKey en gold: va despues de empresas y pais.
-    "almacen": ("dimAlmacen", ["extract_dim_almacen.py", "load_silver_dim_almacen.py", "load_gold_dim_almacen.py"]),
     "motivotraslado": ("dimMotivoTraslado", ["extract_dim_motivo_traslado.py", "load_silver_dim_motivo_traslado.py",
                                              "load_gold_dim_motivo_traslado.py"]),
     # Catalogos propios de la bascula (los usa dw.factBasculaBufalo).

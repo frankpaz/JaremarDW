@@ -1,16 +1,17 @@
 """
-Orquestador de ventas: actualiza dimProducto, corre el hecho de ventas
+Orquestador de ventas: actualiza dimProducto y dimAlmacen, corre el hecho de ventas
 (extract lineas -> extract encabezados -> silver -> gold) y luego el monitor de alertas,
-acotado a los dominios Ventas y Producto.
+acotado a los dominios Ventas, Producto y Almacen.
 
 El hecho es incremental por huella (migraciones 253-255): el extract de lineas compara por dia
 de factura contra el AS400 y solo se traen los dias que no cuadran. La corrida normal compara
 los ultimos 45 dias; con --reconciliar compara todos los que guarda el AS400 (~4 meses: el ERP
 purga lo anterior, que queda vigente en el warehouse) y gold recorre todo [int].
 
-dimProducto va primero para que gold resuelva ProductoKey con datos frescos. dimEmpresas no
+dimProducto y dimAlmacen van primero para que gold resuelva ProductoKey y AlmacenKey con datos
+frescos. dimEmpresas no
 se corre aqui (cambia poco; la actualizan guias, manifiestos y run_dimensiones.py).
-Si la dimension falla, ventas corre igual (las llaves que queden NULL se rellenan en la
+Si una dimension falla, ventas corre igual (las llaves que queden NULL se rellenan en la
 reconciliacion). La logica comun esta en hecho_programado.py.
 
 Uso:
@@ -37,15 +38,15 @@ import hecho_programado  # noqa: E402
 TIMEOUT_PASO_DEFECTO = 1800
 TIMEOUT_PASO_RECONCILIAR = 3600
 
-DIMENSIONES = ["producto"]
+DIMENSIONES = ["producto", "almacen"]
 
 # Dominios de sus procesos en dbo.EtlProcess (para acotar el monitor). Por dominio y no por prefijo:
 # el prefijo "Producto" tambien tomaba ProductoBascula, que es del dominio Basculas.
-DOMINIOS_MONITOR = ["Ventas", "Producto"]
+DOMINIOS_MONITOR = ["Ventas", "Producto", "Almacen"]
 
 
 if __name__ == "__main__":
     raise SystemExit(hecho_programado.main(
         "ventas", "ventas", DIMENSIONES, [], TIMEOUT_PASO_DEFECTO, TIMEOUT_PASO_RECONCILIAR,
-        "Corre dimProducto y el hecho de ventas, y el monitor.", dominios_monitor=DOMINIOS_MONITOR,
+        "Corre dimProducto, dimAlmacen y el hecho de ventas, y el monitor.", dominios_monitor=DOMINIOS_MONITOR,
     ))
