@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Crea tres tareas:
-    JaremarDW-Ventas              corre db\scheduler\run_ventas.py (dimProducto + hecho de ventas
+    JaremarDW-Ventas              corre db\scheduler\run_ventas.py (dimProducto + dimAlmacen + hecho de ventas
                                   + monitor) a las horas de -Horas (default 05:00 y 13:00): compara por
                                   huella solo los dias recientes.
     JaremarDW-Ventas-Reconciliar  corre run_ventas.py --reconciliar TODOS LOS DIAS a -HoraReconciliar
@@ -60,7 +60,7 @@ $ErrorActionPreference = 'Stop'
 $NombreDiaria = 'JaremarDW-Ventas'
 $NombreReconciliar = 'JaremarDW-Ventas-Reconciliar'
 $NombreVigilante = 'JaremarDW-Ventas-Vigilante'
-$Dominios = 'Ventas Producto'
+$Dominios = 'Ventas Producto Almacen'
 
 if ($Desinstalar) {
     foreach ($n in $NombreDiaria, $NombreReconciliar, $NombreVigilante) {

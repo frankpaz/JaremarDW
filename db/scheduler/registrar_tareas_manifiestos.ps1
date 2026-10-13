@@ -67,7 +67,7 @@ $ErrorActionPreference = 'Stop'
 $NombreDiaria = 'JaremarDW-Manifiestos'
 $NombreReconciliar = 'JaremarDW-Manifiestos-Reconciliar'
 $NombreVigilante = 'JaremarDW-Manifiestos-Vigilante'
-$Prefijos = 'Manifiestos Empresas EmpresaMoneda Cliente Producto Ruta'
+$Prefijos = 'Manifiestos Empresas EmpresaMoneda Almacen Ubicacion Cliente Producto Ruta'
 $HorasOmitirTrasReconciliar = 6
 
 if ($Desinstalar) {
