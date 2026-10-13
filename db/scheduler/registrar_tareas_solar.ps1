@@ -5,12 +5,12 @@
 .DESCRIPTION
   Crea dos tareas:
     JaremarDW-Solar            corre db\scheduler\run_solar.py (silver+gold de las 15 tablas solares + monitor)
-                               a las horas de -Horas (default 10:30, 17:30, 20:30 hora local del equipo).
+                               a las horas de -Horas (default 07:30, 14:30, 20:30 hora local del equipo).
     JaremarDW-Solar-Vigilante  corre db\monitor_etl.py acotado a Solar a las 12:00 y 22:00, para avisar
                                si el orquestador no corrio o se colgo (alerta SIN_EXITO a 16 h).
 
-  Las horas asumen un equipo en UTC-6 sin horario de verano: cada corrida queda 30-60 min despues de un
-  lote del proceso externo (SMA/Soliscloud 02/13/20 UTC, Huawei 13 UTC, meteo 11 UTC). Si el servidor
+  Las horas asumen un equipo en UTC-6 sin horario de verano: cada corrida queda 30 min despues de un
+  lote del proceso externo, que actualiza stg a las 07:00, 14:00 y 20:00 hora local. Si el servidor
   tiene otra zona horaria, ajusta -Horas.
 
   Requisitos en el equipo: Python 3 con pyodbc, ODBC Driver for SQL Server, acceso de red a la base,
@@ -37,7 +37,7 @@ param(
     [string]$RutaRepo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$Python = '',
     [string]$EnvFile = '.env.prod',
-    [string[]]$Horas = @('10:30', '17:30', '20:30'),
+    [string[]]$Horas = @('07:30', '14:30', '20:30'),
     [string]$Usuario = '',
     [securestring]$Credencial = $null,
     [switch]$Deshabilitada,

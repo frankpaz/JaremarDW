@@ -1,7 +1,7 @@
 """
 Reporte por correo del dominio Solar. Lo envia db/scheduler/run_solar.py al final de cada corrida:
 
-  - Diario: en la primera corrida del dia desde la hora de reporte (default 10:00), aunque todo este bien.
+  - Diario: en la primera corrida del dia desde la hora de reporte (default 07:00), aunque todo este bien.
     Si un dia no llega, la tarea no corrio (el vigilante tambien avisa).
   - Inmediato: en cualquier corrida con pasos fallidos, con el detalle del error.
 
@@ -25,7 +25,7 @@ from migrate import ROOT, build_connection, load_env
 from monitor_etl import canales_configurados, notificar, obtener_alertas
 
 ESTADO_DEFECTO = ROOT / "logs" / "reporte_solar_estado.json"
-HORA_REPORTE_DEFECTO = 10
+HORA_REPORTE_DEFECTO = 7
 DIAS_SEGUIDOS = 2      # inversores con 2 o mas dias seguidos sin produccion
 DIAS_VENTANA = 30      # "dias sin produccion" se cuenta en los ultimos 30 dias
 LINEAS_SALIDA = 12     # ultimas lineas de la salida de un paso fallido

@@ -18,7 +18,7 @@ Codigos de salida:
 Cada corrida escribe logs/run_solar_AAAAMMDD_HHMMSS.log (se conservan 30 dias) y usa
 logs/run_solar.lock para no solaparse. El monitor (con --alertas-solar) solo deja su reporte en el log
 y define el codigo de salida; el correo lo envia db/reporte_solar.py por los canales ALERT_* del .env:
-el reporte diario en la primera corrida desde --hora-reporte (default 10) y uno inmediato en cualquier
+el reporte diario en la primera corrida desde --hora-reporte (default 7) y uno inmediato en cualquier
 corrida con pasos fallidos. Las cargas de dimPlanGeneracion, geografia y AS400 NO forman parte de esta corrida.
 """
 import argparse
@@ -229,8 +229,8 @@ def main() -> int:
     parser.add_argument("--log-dir", default=str(LOG_DIR_DEFECTO), help="Carpeta de registros y bloqueo (default <repo>/logs).")
     parser.add_argument("--sin-monitor", action="store_true", help="No corre el monitor de alertas al final.")
     parser.add_argument("--sin-reporte", action="store_true", help="No envia el reporte por correo.")
-    parser.add_argument("--hora-reporte", type=int, default=10,
-                        help="El reporte diario sale en la primera corrida desde esta hora (default 10).")
+    parser.add_argument("--hora-reporte", type=int, default=7,
+                        help="El reporte diario sale en la primera corrida desde esta hora (default 7).")
     args = parser.parse_args()
 
     grupos = args.solo or list(GRUPOS)

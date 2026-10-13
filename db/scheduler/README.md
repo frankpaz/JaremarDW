@@ -30,7 +30,7 @@ El monitor (`db/monitor_etl.py`) es de uso general y se queda en `db/`.
 
 | Tarea | Horario (hora local, UTC-6 sin horario de verano) | Comando |
 |---|---|---|
-| Corrida principal | 10:30, 17:30, 20:30 | `python db/scheduler/run_solar.py --env-file .env.prod` |
+| Corrida principal | 07:30, 14:30, 20:30 | `python db/scheduler/run_solar.py --env-file .env.prod` |
 | Vigilante | 12:00, 22:00 | `python db/monitor_etl.py --env-file .env.prod --procesos Sma Huawei Soliscloud Growatt Meteo DeviceCapacity GhiPlan GsaMonthly --horas-sin-exito 16 --sin-repetir-horas 12` |
 | Ventas diaria | 05:00 (excepto domingo) y 13:00 | `python db/scheduler/run_ventas.py --env-file .env.prod` |
 | Ventas reconciliacion | domingo 02:00 | `python db/scheduler/run_ventas.py --env-file .env.prod --reconciliar` |
@@ -64,11 +64,11 @@ Guias se registra con `.\db\scheduler\registrar_tareas_guias.ps1`, con las misma
 
 Las dimensiones (`.\db\scheduler\registrar_tareas_dimensiones.ps1`) corren una vez al dia a las 21:30 (~5 min), fuera de las franjas de los hechos y de las reconciliaciones del domingo (02:00-06:30). Las que resuelven llaves de los hechos ademas se actualizan dentro de cada `run_<hecho>.py`; esta tarea cubre las demas (sector, centro de costo, cuentas, clases de producto, terminos, viaje, pais y geografia). Su vigilante (23:00) ve 1,5 h desde el ultimo exito si todo corrio, y 25,5 h si falto la corrida.
 
-Las horas de Solar caen 30-60 min despues de cada lote que deposita el proceso externo (SMA/Soliscloud 02/13/20 UTC, Huawei 13 UTC, meteo 11 UTC). **Si el servidor no esta en UTC-6, ajustar las horas.**
+Las horas de Solar caen 30 min despues de cada lote que deposita el proceso externo en `stg` (07:00, 14:00 y 20:00 hora local). **Si el servidor no esta en UTC-6, ajustar las horas.**
 
 Codigos de salida de `run_solar.py`: `0` ok, `1` un paso fallo, `2` ya habia otra corrida (bloqueo `logs/run_solar.lock`, vence a las 2 h), `3` pasos ok pero el monitor hallo alertas criticas. Log por corrida: `logs/run_solar_AAAAMMDD_HHMMSS.log` (30 dias).
 
-**Correo de Solar** (`db/reporte_solar.py`, lo envia `run_solar.py`; el monitor de la corrida solo escribe en el log): un reporte diario en la primera corrida desde las 10:00 (`--hora-reporte`), aunque todo este bien, y uno inmediato en cualquier corrida con pasos fallidos. Lleva el estado de la corrida con el detalle de los errores (ultimas lineas de cada paso fallido y `dbo.EtlRunLog`), la tabla de inversores con 2 o mas dias seguidos sin produccion (sin dato o 0 kWh, hasta ayer; `dw.usp_SolarInversoresSinProduccion`) y las demas alertas. Vista previa sin enviar: `python db/reporte_solar.py --env-file .env.prod --vista-previa logs/reporte_solar.html`; prueba de envio: `--enviar`. El vigilante sigue avisando por su cuenta si la corrida no se ejecuta.
+**Correo de Solar** (`db/reporte_solar.py`, lo envia `run_solar.py`; el monitor de la corrida solo escribe en el log): un reporte diario en la primera corrida desde las 07:00 (`--hora-reporte`, la de las 07:30), aunque todo este bien, y uno inmediato en cualquier corrida con pasos fallidos. Lleva el estado de la corrida con el detalle de los errores (ultimas lineas de cada paso fallido y `dbo.EtlRunLog`), la tabla de inversores con 2 o mas dias seguidos sin produccion (sin dato o 0 kWh, hasta ayer; `dw.usp_SolarInversoresSinProduccion`) y las demas alertas. Vista previa sin enviar: `python db/reporte_solar.py --env-file .env.prod --vista-previa logs/reporte_solar.html`; prueba de envio: `--enviar`. El vigilante sigue avisando por su cuenta si la corrida no se ejecuta.
 
 ## Requisitos del equipo
 
@@ -96,7 +96,7 @@ Es la que esta implementada y probada. Desde PowerShell **como administrador**, 
 # Registrar para que corra sin sesion iniciada, con una cuenta de servicio
 .\db\scheduler\registrar_tareas_solar.ps1 -Usuario "DOMINIO\svc_etl" -Credencial (Read-Host -AsSecureString)
 
-# Otras opciones: -RutaRepo, -Python, -EnvFile (default .env.prod), -Horas '10:30','17:30','20:30', -Deshabilitada
+# Otras opciones: -RutaRepo, -Python, -EnvFile (default .env.prod), -Horas '07:30','14:30','20:30', -Deshabilitada
 ```
 
 Crea `JaremarDW-Solar` y `JaremarDW-Solar-Vigilante` con: inicia si se perdio la hora (`StartWhenAvailable`), no permite instancias simultaneas, limite de 1 h (15 min el vigilante) y directorio de trabajo en el repo.
@@ -114,8 +114,8 @@ Get-ChildItem logs\run_solar_*.log | Sort LastWriteTime | Select -Last 1
 Quitar: `.\db\scheduler\registrar_tareas_solar.ps1 -Desinstalar`
 
 Configuracion manual (sin el script), en `taskschd.msc` > Crear tarea:
-1. **General:** nombre `JaremarDW-Solar`; "Ejecutar tanto si el usuario inicio sesion como si no"; sin privilegios elevados.
-2. **Desencadenadores:** 3 diarios (10:30, 17:30, 20:30).
+1. **General:** nombre `JaremarDW-Solar`; "Ejecutar tanto si el usuario inicio sesion como si no"; sin privilegios elevados. La cuenta necesita permiso de modificacion explicito en la carpeta del repo y de lectura en `.env.prod` (con privilegios limitados no le sirve ser administradora), y `pyodbc` instalado para todos (`python -s -m pip install pyodbc` en una consola elevada; si queda en el perfil del instalador, la tarea falla con `No module named 'pyodbc'`).
+2. **Desencadenadores:** 3 diarios (07:30, 14:30, 20:30).
 3. **Acciones:** Programa `C:\...\python.exe`; Argumentos `"C:\...\JaremarDW\db\scheduler\run_solar.py" --env-file "C:\...\JaremarDW\.env.prod"`; Iniciar en `C:\...\JaremarDW`.
 4. **Configuracion:** "Ejecutar lo antes posible si se omitio una ejecucion"; "No iniciar una nueva instancia" si ya se ejecuta; detener tras 1 hora.
 5. Repetir para el vigilante con `db\monitor_etl.py` y los argumentos de la tabla de arriba.
@@ -133,7 +133,7 @@ El orquestador es Python, asi que el Agent solo lo **invoca** con un paso de tip
      "C:\Python313\python.exe" "D:\JaremarDW\db\scheduler\run_solar.py" --env-file "D:\JaremarDW\.env.prod"
      ```
      Si el paso falla con el codigo de salida `1`/`2`/`3`, el Agent lo marca como error (cualquier codigo distinto de 0). Para reintentar un fallo transitorio: reintentos = 1, intervalo = 5 min.
-   - **Schedules:** diario a las 10:30, 17:30 y 20:30 (tres schedules, porque los horarios no son equidistantes).
+   - **Schedules:** diario a las 07:30, 14:30 y 20:30 (tres schedules, porque los horarios no son equidistantes).
    - **Notifications:** operador con correo al fallar (requiere Database Mail configurado). Es un aviso adicional al correo del propio monitor.
 3. Crear el job `JaremarDW-Solar-Vigilante` con un paso CmdExec:
    ```
